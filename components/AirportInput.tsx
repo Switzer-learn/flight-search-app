@@ -27,9 +27,13 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
 
     const {
         defaultAirports,
+        defaultAirportsFetched,
         getCachedAirports,
         cacheAirports
     } = useFlightStore();
+
+    // Show loading when opened but default airports not yet loaded
+    const isInitialLoading = !defaultAirportsFetched && options.length === 0;
 
     // Search airports via Amadeus API
     const fetchAirports = useCallback(async (query: string) => {
@@ -38,6 +42,14 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
         if (query.length < 2) {
             // Show default airports when query is short
             setOptions(defaultAirports);
+            return;
+        }
+
+        // Validate query - skip API call if invalid characters
+        // (only allow letters, numbers, spaces, hyphens, apostrophes)
+        if (!/^[a-zA-Z0-9\s\-']+$/.test(query)) {
+            setOptions([]);
+            setError('No airports found');
             return;
         }
 
@@ -89,23 +101,37 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
             getOptionLabel={(option) => `${option.cityName} (${option.iataCode})`}
             isOptionEqualToValue={(option, val) => option.iataCode === val.iataCode}
             filterOptions={(x) => x} // We handle filtering via API
-            loading={loading}
-            noOptionsText={error || (loading ? 'Searching...' : 'Type to search airports')}
+            loading={loading || isInitialLoading}
+            noOptionsText={error || ((loading || isInitialLoading) ? 'Loading airports...' : 'Type to search airports')}
             size={size}
             slotProps={{
                 popper: {
+                    placement: 'bottom-start' as const,
+                    modifiers: [
+                        {
+                            name: 'flip',
+                            enabled: false,
+                        },
+                        {
+                            name: 'preventOverflow',
+                            options: {
+                                altAxis: true,
+                                mainAxis: true,
+                                boundary: 'viewport',
+                            },
+                        },
+                    ],
                     sx: {
                         '@media (max-width: 768px)': {
-                            width: '100% !important',
-                            left: '0 !important',
-                            right: '0 !important',
-                            position: 'fixed !important',
-                            top: 'auto !important',
-                            bottom: '0 !important',
+                            width: 'calc(100% - 32px) !important',
+                            left: '16px !important',
+                            right: '16px !important',
                             maxHeight: '50vh',
+                            zIndex: 1301,
                             '& .MuiPaper-root': {
-                                borderRadius: '16px 16px 0 0',
+                                borderRadius: '12px',
                                 maxHeight: '50vh',
+                                boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
                             },
                         },
                     },
@@ -150,7 +176,7 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
                     label={label}
                     placeholder={placeholder}
                     variant="outlined"
-                    error={!!error}
+
                     InputProps={{
                         ...params.InputProps,
                         endAdornment: (
