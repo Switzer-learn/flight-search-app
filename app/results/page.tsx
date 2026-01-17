@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, Suspense, useState, useMemo } from 'react';
+import { useEffect, Suspense, useState, useMemo, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useFlightStore } from '@/store/useFlightStore';
+import { useFlightStore, type Flight } from '@/store/useFlightStore';
 import { searchFlights } from '@/app/actions/searchFlights';
 import { searchAirports, type AirportLocation } from '@/app/actions/amadeus';
 import { PriceChart } from '@/components/PriceChart';
@@ -11,6 +11,7 @@ import { FlightCard } from '@/components/FlightCard';
 import { FilterSidebar } from '@/components/FilterSidebar';
 import { AirportInput } from '@/components/AirportInput';
 import { PassengerSelector } from '@/components/PassengerSelector';
+import { SelectedFlightSummary } from '@/components/SelectedFlightSummary';
 import { format, addDays } from 'date-fns';
 
 function ResultsContent() {
@@ -26,6 +27,17 @@ function ResultsContent() {
         setError,
         setSearchParams: setStoreParams,
         searchParams: storeSearchParams,
+        // Round-trip selection
+        selectedOutboundFlight,
+        selectedReturnFlight,
+        filteredReturnFlights,
+        isLoadingReturn,
+        currentLeg,
+        selectOutboundFlight,
+        selectReturnFlight,
+        setReturnFlights,
+        setLoadingReturn,
+        clearFlightSelections,
     } = useFlightStore();
 
     // URL params
@@ -49,33 +61,61 @@ function ResultsContent() {
     const [editChildren, setEditChildren] = useState(childrenParam);
     const [editInfants, setEditInfants] = useState(infantsParam);
     const [airportLoadError, setAirportLoadError] = useState<string | null>(null);
+    const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
-    // Fetch airport details from Amadeus API using IATA codes
+    // Manual expansion state for flight sections
+    const [isOutboundExpanded, setIsOutboundExpanded] = useState(true);
+    const [isReturnExpanded, setIsReturnExpanded] = useState(false);
+
+    // Get cache functions from store
+    const { getCachedAirports, cacheAirports } = useFlightStore();
+
+    // Fetch airport details - prioritize store, then cache, then API
     useEffect(() => {
         async function fetchAirportDetails() {
             if (!from || !to) return;
 
-            // Check if we already have the airports in store
+            // 1. First check if we already have the airports in store (from homepage)
             if (storeSearchParams.origin?.iataCode === from && storeSearchParams.destination?.iataCode === to) {
                 setEditOrigin(storeSearchParams.origin);
                 setEditDestination(storeSearchParams.destination);
                 return;
             }
 
-            try {
-                // Fetch origin and destination from API
-                const [originResults, destResults] = await Promise.all([
-                    searchAirports(from),
-                    searchAirports(to),
-                ]);
+            // Helper to get airport from cache or API
+            const getAirport = async (code: string): Promise<AirportLocation | null> => {
+                // Check cache first
+                const cached = getCachedAirports(code);
+                if (cached && cached.length > 0) {
+                    const match = cached.find(a => a.iataCode === code);
+                    if (match) return match;
+                }
 
-                const origin = originResults.find(a => a.iataCode === from) || originResults[0];
-                const dest = destResults.find(a => a.iataCode === to) || destResults[0];
+                // Fall back to API only if not cached
+                try {
+                    const results = await searchAirports(code);
+                    if (results.length > 0) {
+                        // Cache the results
+                        cacheAirports(code, results);
+                        return results.find(a => a.iataCode === code) || results[0];
+                    }
+                } catch (err) {
+                    console.error('Airport search failed:', err);
+                }
+                return null;
+            };
+
+            try {
+                // Fetch origin and destination (uses cache when available)
+                const [origin, dest] = await Promise.all([
+                    getAirport(from),
+                    getAirport(to),
+                ]);
 
                 if (origin) {
                     setEditOrigin(origin);
                 } else {
-                    // Create minimal airport object if API doesn't return it
+                    // Create minimal airport object if not found
                     setEditOrigin({ iataCode: from, name: from, cityName: from, countryCode: '', countryName: '' });
                 }
 
@@ -94,7 +134,7 @@ function ResultsContent() {
         }
 
         fetchAirportDetails();
-    }, [from, to, storeSearchParams.origin, storeSearchParams.destination]);
+    }, [from, to, storeSearchParams.origin, storeSearchParams.destination, getCachedAirports, cacheAirports]);
 
     // Initialize other edit state when URL params change
     useEffect(() => {
@@ -146,7 +186,7 @@ function ResultsContent() {
         setIsEditing(false);
     };
 
-    // Fetch flights on mount
+    // Fetch flights on mount - for round-trip, fetch both directions simultaneously
     useEffect(() => {
         async function fetchFlights() {
             if (!from || !to || !date) {
@@ -155,41 +195,108 @@ function ResultsContent() {
             }
 
             setLoading(true);
-            const result = await searchFlights({
-                origin: from,
-                destination: to,
-                departureDate: date,
-                returnDate: returnDate || undefined,
-                adults: adultsParam,
-                children: childrenParam,
-                infants: infantsParam,
-            });
 
-            if (result.error) {
-                setError(result.error);
-            } else {
-                setFlights(result.flights);
-                // Update store with current search params
-                if (editOrigin && editDestination) {
-                    setStoreParams({
-                        origin: editOrigin,
-                        destination: editDestination,
+            // For round-trip, fetch both outbound AND return flights in parallel
+            if (isRoundTrip && returnDate) {
+                const [outboundResult, returnResult] = await Promise.all([
+                    searchFlights({
+                        origin: from,
+                        destination: to,
                         departureDate: date,
-                        returnDate: returnDate || '',
-                        tripType: tripTypeParam || (returnDate ? 'round-trip' : 'one-way'),
                         adults: adultsParam,
                         children: childrenParam,
                         infants: infantsParam,
-                    });
+                    }),
+                    searchFlights({
+                        origin: to,  // Swap for return
+                        destination: from,
+                        departureDate: returnDate,
+                        adults: adultsParam,
+                        children: childrenParam,
+                        infants: infantsParam,
+                    }),
+                ]);
+
+                if (outboundResult.error) {
+                    setError(outboundResult.error);
+                } else {
+                    console.log('[Results Page] Outbound flights:', outboundResult.flights.length);
+                    console.log('[Results Page] Return flights:', returnResult.flights.length, returnResult.error);
+
+                    setFlights(outboundResult.flights);
+                    // Pre-load return flights
+                    if (!returnResult.error) {
+                        setReturnFlights(returnResult.flights);
+                    } else {
+                        console.error('[Results Page] Return flight error:', returnResult.error);
+                    }
+                    // Update store with current search params
+                    if (editOrigin && editDestination) {
+                        setStoreParams({
+                            origin: editOrigin,
+                            destination: editDestination,
+                            departureDate: date,
+                            returnDate: returnDate,
+                            tripType: 'round-trip',
+                            adults: adultsParam,
+                            children: childrenParam,
+                            infants: infantsParam,
+                        });
+                    }
+                }
+            } else {
+                // One-way trip - just fetch outbound
+                const result = await searchFlights({
+                    origin: from,
+                    destination: to,
+                    departureDate: date,
+                    adults: adultsParam,
+                    children: childrenParam,
+                    infants: infantsParam,
+                });
+
+                if (result.error) {
+                    setError(result.error);
+                } else {
+                    setFlights(result.flights);
+                    if (editOrigin && editDestination) {
+                        setStoreParams({
+                            origin: editOrigin,
+                            destination: editDestination,
+                            departureDate: date,
+                            returnDate: '',
+                            tripType: 'one-way',
+                            adults: adultsParam,
+                            children: childrenParam,
+                            infants: infantsParam,
+                        });
+                    }
                 }
             }
             setLoading(false);
         }
 
+        // Clear any previous selections when search changes
+        clearFlightSelections();
         fetchFlights();
-    }, [from, to, date, returnDate, adultsParam, childrenParam, infantsParam]);
+    }, [from, to, date, returnDate, adultsParam, childrenParam, infantsParam, isRoundTrip]);
+
+    // Handle flight selection (outbound or return)
+    const handleFlightSelect = useCallback((flight: Flight) => {
+        if (isRoundTrip && !selectedOutboundFlight) {
+            // Selecting outbound flight
+            selectOutboundFlight(flight);
+        } else if (isRoundTrip && selectedOutboundFlight && !selectedReturnFlight) {
+            // Selecting return flight
+            selectReturnFlight(flight);
+        } else {
+            // One-way trip - just select the flight
+            selectOutboundFlight(flight);
+        }
+    }, [isRoundTrip, selectedOutboundFlight, selectedReturnFlight, selectOutboundFlight, selectReturnFlight]);
 
     const cheapestPrice = rawFlights.length > 0 ? Math.min(...rawFlights.map(f => f.price)) : 0;
+    const cheapestReturnPrice = filteredReturnFlights.length > 0 ? Math.min(...filteredReturnFlights.map(f => f.price)) : 0;
 
     return (
         <div className="min-h-screen bg-[#F8FAFC]">
@@ -205,7 +312,25 @@ function ResultsContent() {
                             SkyScout
                         </button>
 
-                        {/* Editable Search Bar */}
+                        {/* Mobile Search Summary */}
+                        <button
+                            onClick={() => setIsEditing(!isEditing)}
+                            className="flex md:hidden items-center gap-1.5 flex-1 justify-center bg-gray-50 py-1.5 px-3 rounded-full text-xs truncate"
+                        >
+                            <span className="font-medium text-gray-900 truncate">
+                                {editOrigin?.cityName || from} → {editDestination?.cityName || to}
+                            </span>
+                            <svg
+                                className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${isEditing ? 'rotate-180' : ''}`}
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+
+                        {/* Desktop Editable Search Bar */}
                         <button
                             onClick={() => setIsEditing(!isEditing)}
                             className="hidden md:flex items-center gap-3 flex-1 justify-center hover:bg-gray-50 py-2 px-4 rounded-xl transition-colors cursor-pointer"
@@ -372,6 +497,16 @@ function ResultsContent() {
                                 <h1 className="text-lg font-semibold text-gray-900">
                                     {filteredFlights.length} flight{filteredFlights.length !== 1 ? 's' : ''} found
                                 </h1>
+                                {/* Mobile Filter Button */}
+                                <button
+                                    onClick={() => setIsFilterDrawerOpen(true)}
+                                    className="lg:hidden flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                                    </svg>
+                                    Filters
+                                </button>
                             </div>
 
                             {/* Chart */}
@@ -379,18 +514,185 @@ function ResultsContent() {
                                 <PriceChart />
                             </div>
 
-                            {/* Flight List */}
-                            <div className="space-y-3">
-                                {filteredFlights.map(flight => (
-                                    <FlightCard
-                                        key={flight.id}
-                                        flight={flight}
-                                        isCheapest={flight.price === cheapestPrice}
-                                        passengerCount={totalTravelers}
-                                        isRoundTrip={isRoundTrip}
-                                    />
-                                ))}
-                            </div>
+                            {/* Selected Flight Summary - Desktop */}
+                            <SelectedFlightSummary passengerCount={totalTravelers} />
+
+                            {/* Outbound Flights Section - Collapsible */}
+                            {isRoundTrip && (
+                                <div className="mb-6">
+                                    <button
+                                        onClick={() => {
+                                            // Toggle expansion - if already selected, allow reopening to change
+                                            if (selectedOutboundFlight) {
+                                                setIsOutboundExpanded(!isOutboundExpanded);
+                                            }
+                                        }}
+                                        className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${selectedOutboundFlight
+                                            ? 'bg-[#3B82F6]/5 border-[#3B82F6]/20 cursor-pointer hover:bg-[#3B82F6]/10'
+                                            : 'bg-white border-gray-200'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${selectedOutboundFlight ? 'bg-[#10B981] text-white' : 'bg-[#3B82F6] text-white'
+                                                }`}>
+                                                {selectedOutboundFlight ? '✓' : '1'}
+                                            </div>
+                                            <div className="text-left">
+                                                <div className="text-sm font-medium text-gray-900">
+                                                    Outbound · {editOrigin?.cityName || from} → {editDestination?.cityName || to}
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {selectedOutboundFlight
+                                                        ? `${selectedOutboundFlight.airline} · ${selectedOutboundFlight.departureTime} - Click to change`
+                                                        : `${date} · ${filteredFlights.length} flights available`
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <svg
+                                            className={`w-5 h-5 text-gray-400 transition-transform ${(!selectedOutboundFlight || isOutboundExpanded) ? 'rotate-180' : ''}`}
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+
+                                    <AnimatePresence>
+                                        {(!selectedOutboundFlight || isOutboundExpanded) && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                transition={{ duration: 0.3 }}
+                                                className="overflow-hidden"
+                                            >
+                                                <div className="space-y-3 pt-4">
+                                                    {filteredFlights.map(flight => (
+                                                        <FlightCard
+                                                            key={flight.id}
+                                                            flight={flight}
+                                                            isCheapest={flight.price === cheapestPrice}
+                                                            passengerCount={totalTravelers}
+                                                            isRoundTrip={false}
+                                                            onSelect={(f) => {
+                                                                handleFlightSelect(f);
+                                                                setIsOutboundExpanded(false);
+                                                                setIsReturnExpanded(true);
+                                                            }}
+                                                            originCode={from || ''}
+                                                            destinationCode={to || ''}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            )}
+
+                            {/* One-way Flight List (non-round-trip) */}
+                            {!isRoundTrip && (
+                                <div className="space-y-3">
+                                    {filteredFlights.map(flight => (
+                                        <FlightCard
+                                            key={flight.id}
+                                            flight={flight}
+                                            isCheapest={flight.price === cheapestPrice}
+                                            passengerCount={totalTravelers}
+                                            isRoundTrip={false}
+                                            onSelect={handleFlightSelect}
+                                            originCode={from || ''}
+                                            destinationCode={to || ''}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Return Flights Section - Collapsible, expands after outbound selected */}
+                            {isRoundTrip && (
+                                <div className="mb-6">
+                                    <button
+                                        onClick={() => {
+                                            // Toggle expansion - if already selected, allow reopening to change
+                                            if (selectedOutboundFlight && selectedReturnFlight) {
+                                                setIsReturnExpanded(!isReturnExpanded);
+                                            }
+                                        }}
+                                        className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${!selectedOutboundFlight
+                                            ? 'bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed'
+                                            : selectedReturnFlight
+                                                ? 'bg-[#3B82F6]/5 border-[#3B82F6]/20 cursor-pointer hover:bg-[#3B82F6]/10'
+                                                : 'bg-white border-gray-200'
+                                            }`}
+                                        disabled={!selectedOutboundFlight}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${selectedReturnFlight ? 'bg-[#10B981] text-white' :
+                                                selectedOutboundFlight ? 'bg-[#3B82F6] text-white' : 'bg-gray-300 text-white'
+                                                }`}>
+                                                {selectedReturnFlight ? '✓' : '2'}
+                                            </div>
+                                            <div className="text-left">
+                                                <div className="text-sm font-medium text-gray-900">
+                                                    Return · {editDestination?.cityName || to} → {editOrigin?.cityName || from}
+                                                </div>
+                                                <div className="text-xs text-gray-500">
+                                                    {selectedReturnFlight
+                                                        ? `${selectedReturnFlight.airline} · ${selectedReturnFlight.departureTime} - Click to change`
+                                                        : `${returnDate} · ${filteredReturnFlights.length} flights available`
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <svg
+                                            className={`w-5 h-5 text-gray-400 transition-transform ${(selectedOutboundFlight && !selectedReturnFlight) || isReturnExpanded ? 'rotate-180' : ''}`}
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+
+                                    <AnimatePresence>
+                                        {selectedOutboundFlight && (!selectedReturnFlight || isReturnExpanded) && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                transition={{ duration: 0.3 }}
+                                                className="overflow-hidden"
+                                            >
+                                                <div className="space-y-3 pt-4">
+                                                    {filteredReturnFlights.length > 0 ? (
+                                                        filteredReturnFlights.map(flight => (
+                                                            <FlightCard
+                                                                key={flight.id}
+                                                                flight={flight}
+                                                                isCheapest={flight.price === cheapestReturnPrice}
+                                                                passengerCount={totalTravelers}
+                                                                isRoundTrip={false}
+                                                                onSelect={(f) => {
+                                                                    handleFlightSelect(f);
+                                                                    setIsReturnExpanded(false);
+                                                                }}
+                                                                originCode={to || ''}
+                                                                destinationCode={from || ''}
+                                                            />
+                                                        ))
+                                                    ) : (
+                                                        <div className="text-center py-8 bg-white rounded-2xl border border-gray-100">
+                                                            <p className="text-gray-500">No return flights available</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            )}
 
                             {filteredFlights.length === 0 && rawFlights.length > 0 && (
                                 <div className="text-center py-12">
@@ -407,6 +709,56 @@ function ResultsContent() {
                     </div>
                 )}
             </main>
+
+            {/* Mobile Filter Drawer */}
+            <AnimatePresence>
+                {isFilterDrawerOpen && (
+                    <>
+                        {/* Backdrop */}
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setIsFilterDrawerOpen(false)}
+                            className="fixed inset-0 bg-black/50 z-50 lg:hidden"
+                        />
+                        {/* Drawer */}
+                        <motion.div
+                            initial={{ x: '100%' }}
+                            animate={{ x: 0 }}
+                            exit={{ x: '100%' }}
+                            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                            className="fixed right-0 top-0 bottom-0 w-[85%] max-w-sm bg-white z-50 lg:hidden overflow-y-auto shadow-2xl"
+                        >
+                            {/* Drawer Header */}
+                            <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between z-10">
+                                <h2 className="text-lg font-semibold text-gray-900">Filters</h2>
+                                <button
+                                    onClick={() => setIsFilterDrawerOpen(false)}
+                                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                                >
+                                    <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            {/* Filter Content */}
+                            <div className="p-4">
+                                <FilterSidebar />
+                            </div>
+                            {/* Apply Button */}
+                            <div className="sticky bottom-0 bg-white border-t border-gray-100 p-4">
+                                <button
+                                    onClick={() => setIsFilterDrawerOpen(false)}
+                                    className="w-full bg-[#3B82F6] hover:bg-[#2563EB] text-white font-medium py-3 rounded-xl transition-colors"
+                                >
+                                    Apply Filters
+                                </button>
+                            </div>
+                        </motion.div>
+                    </>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

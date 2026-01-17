@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { searchAirports, getTravelRecommendations } from '@/app/actions/amadeus';
+import { searchAirports } from '@/app/actions/amadeus';
 import { useFlightStore } from '@/store/useFlightStore';
 
 /**
@@ -48,23 +48,6 @@ export function AppInitializer() {
             fetchAirports();
         }
     }, [defaultAirportsFetched, setDefaultAirports, setError]);
-
-    useEffect(() => {
-        // Fetch travel recommendations on first load
-        if (!recommendationsFetched) {
-            async function fetchRecommendations() {
-                try {
-                    const recs = await getTravelRecommendations(['NYC', 'LON', 'PAR'], 'US');
-                    setRecommendations(recs);
-                } catch (error) {
-                    console.error('Failed to fetch recommendations:', error);
-                    // Don't set error for recommendations - it's not critical
-                    setRecommendations([]);
-                }
-            }
-            fetchRecommendations();
-        }
-    }, [recommendationsFetched, setRecommendations]);
 
     // This component renders nothing - it just initializes data
     return null;

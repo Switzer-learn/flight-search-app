@@ -80,16 +80,48 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
                     setOptions(defaultAirports);
                 }
             }}
-            options={options}
+            options={options.filter((airport, index, self) =>
+                index === self.findIndex(a => a.iataCode === airport.iataCode)
+            )}
             getOptionLabel={(option) => `${option.cityName} (${option.iataCode})`}
             isOptionEqualToValue={(option, val) => option.iataCode === val.iataCode}
             filterOptions={(x) => x} // We handle filtering via API
             loading={loading}
             noOptionsText={error || (loading ? 'Searching...' : 'Type to search airports')}
             size={size}
+            slotProps={{
+                popper: {
+                    sx: {
+                        '@media (max-width: 768px)': {
+                            width: '100% !important',
+                            left: '0 !important',
+                            right: '0 !important',
+                            position: 'fixed !important',
+                            top: 'auto !important',
+                            bottom: '0 !important',
+                            maxHeight: '50vh',
+                            '& .MuiPaper-root': {
+                                borderRadius: '16px 16px 0 0',
+                                maxHeight: '50vh',
+                            },
+                        },
+                    },
+                },
+                listbox: {
+                    sx: {
+                        '@media (max-width: 768px)': {
+                            maxHeight: '45vh',
+                            padding: '8px 0',
+                        },
+                    },
+                },
+            }}
             sx={{
-                flex: 1,
-                minWidth: size === 'small' ? 140 : 200,
+                minWidth: size === 'small' ? 120 : 180,
+                width: '100%',
+                '@media (max-width: 768px)': {
+                    minWidth: 'unset',
+                },
                 '& .MuiOutlinedInput-root': {
                     borderRadius: size === 'small' ? '8px' : '12px',
                     backgroundColor: 'white',
@@ -138,7 +170,13 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
                             display: 'flex',
                             alignItems: 'center',
                             gap: 1.5,
-                            py: 1,
+                            py: 1.5,
+                            px: 2,
+                            minHeight: 56,
+                            '@media (max-width: 768px)': {
+                                py: 2,
+                                minHeight: 64,
+                            },
                         }}
                     >
                         <Box
@@ -153,19 +191,39 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
                                 fontWeight: 700,
                                 fontSize: '0.875rem',
                                 borderRadius: '6px',
+                                flexShrink: 0,
                             }}
                         >
                             {option.iataCode}
                         </Box>
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Box sx={{ fontWeight: 500, color: '#111827', fontSize: '0.875rem' }}>
+                        <Box sx={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                            <Box sx={{
+                                fontWeight: 500,
+                                color: '#111827',
+                                fontSize: '0.875rem',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                            }}>
                                 {option.cityName}
                             </Box>
-                            <Box sx={{ fontSize: '0.75rem', color: '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Box sx={{
+                                fontSize: '0.75rem',
+                                color: '#6B7280',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginTop: '2px',
+                            }}>
                                 {option.name}
                             </Box>
                         </Box>
-                        <Box sx={{ fontSize: '0.75rem', color: '#9CA3AF' }}>
+                        <Box sx={{
+                            fontSize: '0.75rem',
+                            color: '#9CA3AF',
+                            flexShrink: 0,
+                            display: { xs: 'none', sm: 'block' },
+                        }}>
                             {option.countryName || option.countryCode}
                         </Box>
                     </Box>

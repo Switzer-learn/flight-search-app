@@ -1,18 +1,46 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useFlightStore } from '@/store/useFlightStore';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export function PriceChart() {
-    const { filteredFlights, chartView, setChartView, setHighlightedFlight, highlightedFlightId } = useFlightStore();
+    const {
+        filteredFlights,
+        filteredReturnFlights,
+        selectedOutboundFlight,
+        searchParams,
+        chartView,
+        setChartView,
+        setHighlightedFlight,
+        highlightedFlightId
+    } = useFlightStore();
+
+    // Start collapsed on mobile, expanded on desktop
+    const [isExpanded, setIsExpanded] = useState(true);
+
+    // Detect mobile on mount and auto-collapse
+    useEffect(() => {
+        const checkMobile = () => {
+            const mobile = window.innerWidth < 768;
+            if (mobile) setIsExpanded(false);
+        };
+        checkMobile();
+    }, []);
+
+    // Determine which flights to show based on selection state
+    const isRoundTrip = searchParams.tripType === 'round-trip';
+    const showReturnData = isRoundTrip && selectedOutboundFlight && filteredReturnFlights.length > 0;
+    const flightsToShow = showReturnData ? filteredReturnFlights : filteredFlights;
+    const chartLabel = showReturnData ? 'Return Flights' : 'Outbound Flights';
 
     const chartData = useMemo(() => {
-        if (!filteredFlights.length) return [];
+        if (!flightsToShow.length) return [];
 
-        const cheapestPrice = Math.min(...filteredFlights.map(f => f.price));
+        const cheapestPrice = Math.min(...flightsToShow.map(f => f.price));
 
-        return filteredFlights.map(f => {
+        return flightsToShow.map(f => {
             // Parse departure time to minutes since midnight for X axis (Time view)
             const [hours, minutes] = f.departureTime.split(':').map(Number);
             const timeValue = hours * 60 + minutes;
@@ -30,7 +58,7 @@ export function PriceChart() {
                 isHighlighted: f.id === highlightedFlightId,
             };
         });
-    }, [filteredFlights, chartView, highlightedFlightId]);
+    }, [flightsToShow, chartView, highlightedFlightId]);
 
     const xDomain = useMemo(() => {
         if (!chartData.length) return [0, 100];
@@ -120,91 +148,124 @@ export function PriceChart() {
     }
 
     return (
-        <div className="bg-white rounded-2xl border border-gray-100 p-6">
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 md:p-6">
             {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-                <div>
+            <div className="flex items-center justify-between">
+                <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className="flex items-center gap-2 hover:bg-gray-50 rounded-lg py-1 px-2 -ml-2 transition-colors"
+                >
                     <h3 className="font-semibold text-gray-900">Price Insights</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">Click a dot to highlight the flight</p>
-                </div>
-
-                {/* Toggle */}
-                <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
-                    {(['time', 'duration'] as const).map((view) => (
-                        <button
-                            key={view}
-                            onClick={() => setChartView(view)}
-                            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all
-                ${chartView === view
-                                    ? 'bg-white text-gray-900 shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            {view === 'time' ? 'Time' : 'Duration'}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            {/* Chart */}
-            <ResponsiveContainer width="100%" height={280}>
-                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                    <XAxis
-                        type="number"
-                        dataKey="x"
-                        domain={xDomain}
-                        tickFormatter={formatXAxis}
-                        tick={{ fontSize: 12, fill: '#9CA3AF' }}
-                        axisLine={{ stroke: '#E5E7EB' }}
-                        tickLine={false}
-                        name={chartView === 'time' ? 'Time of Day' : 'Duration'}
-                    />
-                    <YAxis
-                        type="number"
-                        dataKey="y"
-                        domain={yDomain}
-                        tickFormatter={(v) => `$${v}`}
-                        tick={{ fontSize: 12, fill: '#9CA3AF' }}
-                        axisLine={{ stroke: '#E5E7EB' }}
-                        tickLine={false}
-                        name="Price"
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Scatter
-                        data={chartData}
-                        fill="#3B82F6"
-                        onClick={(data) => handleDotClick(data)}
+                    {isRoundTrip && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${showReturnData ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                            }`}>
+                            {showReturnData ? 'Return' : 'Outbound'}
+                        </span>
+                    )}
+                    <svg
+                        className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                     >
-                        {chartData.map((entry, index) => (
-                            <Cell
-                                key={`cell-${index}`}
-                                fill={getDotColor(entry)}
-                                r={entry.isHighlighted ? 10 : (entry.isCheapest ? 8 : 6)}
-                                style={{ cursor: 'pointer' }}
-                            />
-                        ))}
-                    </Scatter>
-                </ScatterChart>
-            </ResponsiveContainer>
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                </button>
 
-            {/* Legend */}
-            <div className="flex justify-center gap-6 mt-4 text-xs">
-                <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#10B981]" />
-                    <span className="text-gray-500">Best Price</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#3B82F6]" />
-                    <span className="text-gray-500">Standard</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#F97316]" />
-                    <span className="text-gray-500">2+ Stops</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-[#8B5CF6]" />
-                    <span className="text-gray-500">Highlighted</span>
-                </div>
+                {/* Toggle - only show when expanded */}
+                {isExpanded && (
+                    <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+                        {(['time', 'duration'] as const).map((view) => (
+                            <button
+                                key={view}
+                                onClick={() => setChartView(view)}
+                                className={`px-3 md:px-4 py-1.5 rounded-md text-xs md:text-sm font-medium transition-all
+                                    ${chartView === view
+                                        ? 'bg-white text-gray-900 shadow-sm'
+                                        : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                {view === 'time' ? 'Time' : 'Duration'}
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
+
+            {/* Collapsible Chart */}
+            <AnimatePresence>
+                {isExpanded && (
+                    <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                    >
+                        <p className="text-xs text-gray-400 mt-2 mb-4">Click a dot to highlight the flight</p>
+
+                        {/* Chart */}
+                        <ResponsiveContainer width="100%" height={220}>
+                            <ScatterChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+                                <XAxis
+                                    type="number"
+                                    dataKey="x"
+                                    domain={xDomain}
+                                    tickFormatter={formatXAxis}
+                                    tick={{ fontSize: 11, fill: '#9CA3AF' }}
+                                    axisLine={{ stroke: '#E5E7EB' }}
+                                    tickLine={false}
+                                    name={chartView === 'time' ? 'Time of Day' : 'Duration'}
+                                />
+                                <YAxis
+                                    type="number"
+                                    dataKey="y"
+                                    domain={yDomain}
+                                    tickFormatter={(v) => `$${v}`}
+                                    tick={{ fontSize: 11, fill: '#9CA3AF' }}
+                                    axisLine={{ stroke: '#E5E7EB' }}
+                                    tickLine={false}
+                                    name="Price"
+                                    width={45}
+                                />
+                                <Tooltip content={<CustomTooltip />} />
+                                <Scatter
+                                    data={chartData}
+                                    fill="#3B82F6"
+                                    onClick={(data) => handleDotClick(data)}
+                                >
+                                    {chartData.map((entry, index) => (
+                                        <Cell
+                                            key={`cell-${index}`}
+                                            fill={getDotColor(entry)}
+                                            r={entry.isHighlighted ? 10 : (entry.isCheapest ? 8 : 6)}
+                                            style={{ cursor: 'pointer' }}
+                                        />
+                                    ))}
+                                </Scatter>
+                            </ScatterChart>
+                        </ResponsiveContainer>
+
+                        {/* Legend */}
+                        <div className="flex flex-wrap justify-center gap-4 md:gap-6 mt-4 text-xs">
+                            <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-[#10B981]" />
+                                <span className="text-gray-500">Best Price</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-[#3B82F6]" />
+                                <span className="text-gray-500">Standard</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-[#F97316]" />
+                                <span className="text-gray-500">2+ Stops</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-[#8B5CF6]" />
+                                <span className="text-gray-500">Highlighted</span>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

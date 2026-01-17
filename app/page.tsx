@@ -1,33 +1,11 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { useRouter } from 'next/navigation';
 import { SearchForm } from '@/components/SearchForm';
 import { useFlightStore } from '@/store/useFlightStore';
-import type { TravelRecommendation } from '@/app/actions/amadeus';
-import type { AirportLocation } from '@/app/actions/amadeus';
 
 export default function Home() {
-  const router = useRouter();
-  const {
-    recommendations,
-    recommendationsFetched,
-    setSearchParams,
-    error,
-    defaultAirportsFetched,
-  } = useFlightStore();
-
-  // Handle recommendation click - set as destination
-  const handleRecommendationClick = (dest: TravelRecommendation) => {
-    const airportLocation: AirportLocation = {
-      iataCode: dest.iataCode,
-      name: dest.name,
-      cityName: dest.name,
-      countryCode: '',
-      countryName: '',
-    };
-    setSearchParams({ destination: airportLocation });
-  };
+  const { error, defaultAirportsFetched } = useFlightStore();
 
   // Show error state if API failed
   if (error && defaultAirportsFetched) {
@@ -54,8 +32,6 @@ export default function Home() {
       </div>
     );
   }
-
-  const isLoading = !recommendationsFetched;
 
   return (
     <div className="min-h-screen bg-linear-to-br from-[#F0F7FF] via-white to-[#E8F4FF]">
@@ -90,67 +66,6 @@ export default function Home() {
 
           {/* Search Form */}
           <SearchForm />
-
-          {/* Travel Recommendations - from Amadeus API only */}
-          <div className="mt-20">
-            <h2 className="text-xl font-semibold text-gray-900 mb-2 text-center">
-              Recommended Destinations
-            </h2>
-            <p className="text-sm text-gray-500 text-center mb-6">
-              {recommendations.length > 0 ? 'Click to set as your destination' : 'Powered by Amadeus Travel Recommendations API'}
-            </p>
-
-            {isLoading ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 max-w-5xl mx-auto">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <div key={i} className="bg-white/60 rounded-2xl p-4 animate-pulse">
-                    <div className="h-4 bg-gray-200 rounded w-20 mb-2" />
-                    <div className="h-3 bg-gray-100 rounded w-12" />
-                  </div>
-                ))}
-              </div>
-            ) : recommendations.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 max-w-5xl mx-auto">
-                {recommendations.map((dest, index) => (
-                  <motion.button
-                    key={dest.iataCode}
-                    onClick={() => handleRecommendationClick(dest)}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="group bg-white/60 backdrop-blur-sm border border-gray-100 rounded-2xl p-4 text-left
-                      hover:bg-white hover:shadow-lg hover:shadow-gray-100/50 hover:border-[#3B82F6]/30 transition-all duration-300 cursor-pointer"
-                  >
-                    <div className="text-sm font-semibold text-gray-900 group-hover:text-[#3B82F6] transition-colors">
-                      {dest.name}
-                    </div>
-                    <div className="text-xs text-gray-400">{dest.iataCode}</div>
-                    {dest.relevance > 0 && (
-                      <div className="mt-2">
-                        <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-[#3B82F6] rounded-full"
-                            style={{ width: `${Math.min(dest.relevance * 100, 100)}%` }}
-                          />
-                        </div>
-                        <span className="text-[10px] text-gray-400">
-                          {Math.round(dest.relevance * 100)}% match
-                        </span>
-                      </div>
-                    )}
-                  </motion.button>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <p className="text-gray-400 text-sm">
-                  No recommendations available from Amadeus API
-                </p>
-              </div>
-            )}
-          </div>
         </div>
       </main>
     </div>

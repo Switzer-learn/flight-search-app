@@ -81,20 +81,22 @@ export function SearchForm() {
             {/* Card Container */}
             <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl shadow-gray-200/50 p-6 md:p-8 border border-gray-100">
                 {/* Trip Type Toggle */}
-                <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit mb-6">
-                    {(['one-way', 'round-trip'] as const).map((type) => (
-                        <button
-                            key={type}
-                            type="button"
-                            onClick={() => setTripType(type)}
-                            className={`px-5 py-2 rounded-lg font-medium text-sm transition-all duration-200
+                <div className="flex justify-center md:justify-start mb-6">
+                    <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
+                        {(['one-way', 'round-trip'] as const).map((type) => (
+                            <button
+                                key={type}
+                                type="button"
+                                onClick={() => setTripType(type)}
+                                className={`px-5 py-2 rounded-lg font-medium text-sm transition-all duration-200
                 ${tripType === type
-                                    ? 'bg-white text-gray-900 shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-700'}`}
-                        >
-                            {type === 'one-way' ? 'One Way' : 'Round Trip'}
-                        </button>
-                    ))}
+                                        ? 'bg-white text-gray-900 shadow-sm'
+                                        : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                {type === 'one-way' ? 'One Way' : 'Round Trip'}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Search Inputs */}
@@ -112,8 +114,8 @@ export function SearchForm() {
                         <button
                             type="button"
                             onClick={handleSwap}
-                            className="hidden md:flex w-10 h-10 items-center justify-center rounded-full border-2 border-gray-200 
-                bg-white hover:border-[#3B82F6] hover:text-[#3B82F6] transition-colors text-lg mb-1"
+                            className="flex w-8 h-8 md:w-10 md:h-10 items-center justify-center rounded-full border-2 border-gray-200 
+                bg-white text-gray-800 hover:border-[#3B82F6] hover:text-[#3B82F6] transition-colors text-base md:text-lg shrink-0 self-center md:self-end md:mb-1"
                         >
                             ⇄
                         </button>
@@ -126,10 +128,10 @@ export function SearchForm() {
                         />
                     </div>
 
-                    {/* Date and Passengers Row */}
-                    <div className="flex flex-col md:flex-row gap-3 items-end">
+                    {/* Date Row - Departure and Return side by side */}
+                    <div className="flex flex-row gap-3">
                         {/* Departure Date */}
-                        <div className="flex-1 min-w-[150px]">
+                        <div className="flex-1">
                             <label className="block text-xs font-medium text-gray-500 mb-1">Departure</label>
                             <input
                                 type="date"
@@ -137,19 +139,19 @@ export function SearchForm() {
                                 onChange={(e) => setDepartureDate(e.target.value)}
                                 min={today}
                                 max={maxDate}
-                                className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 
-                  text-gray-900 outline-none focus:border-[#3B82F6] focus:ring-2 focus:ring-[#3B82F6]/20
-                  hover:border-gray-300 transition-all duration-200"
+                                className="w-full bg-white border border-gray-200 rounded-xl px-3 md:px-4 py-3 
+                                    text-gray-900 outline-none focus:border-[#3B82F6] focus:ring-2 focus:ring-[#3B82F6]/20
+                                    hover:border-gray-300 transition-all duration-200 text-sm md:text-base"
                             />
                         </div>
 
                         {/* Return Date (conditional) */}
                         {tripType === 'round-trip' && (
                             <motion.div
-                                initial={{ opacity: 0, width: 0 }}
-                                animate={{ opacity: 1, width: 'auto' }}
-                                exit={{ opacity: 0, width: 0 }}
-                                className="flex-1 min-w-[150px]"
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.95 }}
+                                className="flex-1"
                             >
                                 <label className="block text-xs font-medium text-gray-500 mb-1">Return</label>
                                 <input
@@ -158,14 +160,16 @@ export function SearchForm() {
                                     onChange={(e) => setReturnDate(e.target.value)}
                                     min={departureDate || today}
                                     max={maxDate}
-                                    className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 
-                    text-gray-900 outline-none focus:border-[#3B82F6] focus:ring-2 focus:ring-[#3B82F6]/20
-                    hover:border-gray-300 transition-all duration-200"
+                                    className="w-full bg-white border border-gray-200 rounded-xl px-3 md:px-4 py-3 
+                                        text-gray-900 outline-none focus:border-[#3B82F6] focus:ring-2 focus:ring-[#3B82F6]/20
+                                        hover:border-gray-300 transition-all duration-200 text-sm md:text-base"
                                 />
                             </motion.div>
                         )}
+                    </div>
 
-                        {/* Passengers */}
+                    {/* Passengers Row */}
+                    <div className="flex justify-start">
                         <PassengerSelector
                             adults={adults}
                             children={children}

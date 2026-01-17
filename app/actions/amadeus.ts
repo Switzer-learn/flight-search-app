@@ -55,7 +55,7 @@ export async function searchAirports(keyword: string): Promise<AirportLocation[]
     const token = await getAmadeusToken();
     
     const response = await fetch(
-      `https://test.api.amadeus.com/v1/reference-data/locations?subType=AIRPORT,CITY&keyword=${encodeURIComponent(keyword)}&page[limit]=10`,
+      `https://test.api.amadeus.com/v1/reference-data/locations?subType=AIRPORT,CITY&keyword=${encodeURIComponent(keyword)}&page[limit]=100`,
       {
         headers: { Authorization: `Bearer ${token}` },
       }
@@ -85,61 +85,3 @@ export async function searchAirports(keyword: string): Promise<AirportLocation[]
   }
 }
 
-// Travel Recommendations API
-export interface TravelRecommendation {
-  type: string;
-  subType: string;
-  name: string;
-  iataCode: string;
-  geoCode: {
-    latitude: number;
-    longitude: number;
-  };
-  relevance: number;
-}
-
-export async function getTravelRecommendations(
-  cityCodes: string[],
-  travelerCountryCode: string = 'US'
-): Promise<TravelRecommendation[]> {
-  if (!cityCodes.length) return [];
-  
-  try {
-    const token = await getAmadeusToken();
-    
-    const params = new URLSearchParams({
-      cityCodes: cityCodes.join(','),
-      travelerCountryCode,
-    });
-    
-    const response = await fetch(
-      `https://test.api.amadeus.com/v1/reference-data/recommended-locations?${params}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
-    
-    if (!response.ok) {
-      console.error('Travel recommendations failed:', await response.text());
-      return [];
-    }
-    
-    const data = await response.json();
-    
-    if (!data.data || data.data.length === 0) {
-      return [];
-    }
-    
-    return data.data.slice(0, 6).map((rec: any) => ({
-      type: rec.type,
-      subType: rec.subType,
-      name: rec.name,
-      iataCode: rec.iataCode,
-      geoCode: rec.geoCode || { latitude: 0, longitude: 0 },
-      relevance: rec.relevance || 0,
-    }));
-  } catch (error) {
-    console.error('Travel recommendations error:', error);
-    return [];
-  }
-}

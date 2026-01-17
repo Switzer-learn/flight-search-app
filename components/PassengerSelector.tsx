@@ -46,17 +46,17 @@ export function PassengerSelector({ adults, children, infants, onChange }: Passe
                     onClick={() => value > min && onUpdate(value - 1)}
                     disabled={value <= min}
                     className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-lg font-light
-            disabled:opacity-40 disabled:cursor-not-allowed hover:border-[#3B82F6] hover:text-[#3B82F6] transition-colors"
+            disabled:opacity-40 disabled:cursor-not-allowed hover:border-[#3B82F6] hover:text-[#3B82F6] transition-colors text-gray-800"
                 >
                     −
                 </button>
-                <span className="w-6 text-center font-medium">{value}</span>
+                <span className="w-6 text-center font-medium text-gray-800">{value}</span>
                 <button
                     type="button"
                     onClick={() => value < max && onUpdate(value + 1)}
                     disabled={value >= max}
                     className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-lg font-light
-            disabled:opacity-40 disabled:cursor-not-allowed hover:border-[#3B82F6] hover:text-[#3B82F6] transition-colors"
+            disabled:opacity-40 disabled:cursor-not-allowed hover:border-[#3B82F6] hover:text-[#3B82F6] transition-colors text-gray-800"
                 >
                     +
                 </button>

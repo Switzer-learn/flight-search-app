@@ -88,6 +88,14 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Search
       searchParams.set('infants', params.infants.toString());
     }
     
+    console.log('[searchFlights] Request:', {
+      origin: params.origin,
+      destination: params.destination,
+      departureDate: params.departureDate,
+      returnDate: params.returnDate,
+      fullUrl: `https://test.api.amadeus.com/v2/shopping/flight-offers?${searchParams}`
+    });
+    
     const response = await fetch(
       `https://test.api.amadeus.com/v2/shopping/flight-offers?${searchParams}`,
       {
@@ -97,11 +105,17 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Search
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error('Amadeus API error:', errorData);
+      console.error('[searchFlights] API error:', errorData);
       return { flights: [], error: 'Failed to fetch flights. Please try again.' };
     }
     
     const data = await response.json();
+    
+    console.log('[searchFlights] Response:', {
+      origin: params.origin,
+      destination: params.destination,
+      flightCount: data.data?.length || 0,
+    });
     
     if (!data.data || data.data.length === 0) {
       return { flights: [], error: null }; // No flights found, not an error

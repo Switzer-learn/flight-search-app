@@ -11,6 +11,8 @@ interface FlightCardProps {
     passengerCount?: number;
     isRoundTrip?: boolean;
     onSelect?: (flight: Flight, isReturn?: boolean) => void;
+    originCode?: string;
+    destinationCode?: string;
 }
 
 export function FlightCard({
@@ -18,7 +20,9 @@ export function FlightCard({
     isCheapest,
     passengerCount = 1,
     isRoundTrip = false,
-    onSelect
+    onSelect,
+    originCode,
+    destinationCode,
 }: FlightCardProps) {
     const [showReturnSelect, setShowReturnSelect] = useState(false);
 
@@ -59,7 +63,7 @@ export function FlightCard({
                 </div>
             )}
 
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 {/* Airline & Flight Info */}
                 <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
@@ -71,13 +75,16 @@ export function FlightCard({
                     </div>
 
                     {/* Time & Duration */}
-                    <div className="flex items-center gap-4">
-                        <div className="text-right">
-                            <div className="text-xl font-semibold text-gray-900">{flight.departureTime}</div>
+                    <div className="flex items-center gap-2 md:gap-4">
+                        <div className="text-center md:text-right">
+                            {originCode && (
+                                <div className="text-xs text-gray-400 font-medium">{originCode}</div>
+                            )}
+                            <div className="text-lg md:text-xl font-semibold text-gray-900">{flight.departureTime}</div>
                         </div>
 
                         {/* Duration Bar */}
-                        <div className="flex-1 flex flex-col items-center">
+                        <div className="flex-1 flex flex-col items-center min-w-[80px]">
                             <span className="text-xs text-gray-400 mb-1">{formatDuration(flight.duration)}</span>
                             <div className="w-full h-[2px] bg-gray-200 relative">
                                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-2 bg-gray-400 rounded-full" />
@@ -91,23 +98,28 @@ export function FlightCard({
                             </span>
                         </div>
 
-                        <div className="text-left">
-                            <div className="text-xl font-semibold text-gray-900">{flight.arrivalTime}</div>
+                        <div className="text-center md:text-left">
+                            {destinationCode && (
+                                <div className="text-xs text-gray-400 font-medium">{destinationCode}</div>
+                            )}
+                            <div className="text-lg md:text-xl font-semibold text-gray-900">{flight.arrivalTime}</div>
                         </div>
                     </div>
                 </div>
 
-                {/* Price & CTA */}
-                <div className="text-right pl-6 border-l border-gray-100">
-                    <div className="text-2xl font-bold text-gray-900">
-                        ${totalPrice.toLocaleString()}
-                    </div>
-                    <div className="text-xs text-gray-400 mb-3">
-                        {passengerCount > 1 ? `for ${passengerCount} travelers` : 'per person'}
+                {/* Price & CTA - Full width on mobile */}
+                <div className="flex items-center justify-between md:justify-end md:text-right md:pl-6 md:border-l md:border-gray-100 pt-3 md:pt-0 border-t md:border-t-0 border-gray-100">
+                    <div className="md:mr-4">
+                        <div className="text-xl md:text-2xl font-bold text-gray-900">
+                            ${totalPrice.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-gray-400">
+                            {passengerCount > 1 ? `for ${passengerCount} travelers` : 'per person'}
+                        </div>
                     </div>
                     <button
                         onClick={handleSelect}
-                        className="bg-[#3B82F6] hover:bg-[#2563EB] text-white text-sm font-medium px-5 py-2 rounded-xl transition-colors"
+                        className="bg-[#3B82F6] hover:bg-[#2563EB] text-white text-sm font-medium px-5 py-2.5 rounded-xl transition-colors"
                     >
                         Select
                     </button>

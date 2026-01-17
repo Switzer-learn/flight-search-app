@@ -1,7 +1,8 @@
 'use client';
 
 import { create } from 'zustand';
-import type { AirportLocation, TravelRecommendation } from '@/app/actions/amadeus';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import type { AirportLocation } from '@/app/actions/amadeus';
 
 // Types
 export interface SearchParams {
@@ -64,11 +65,19 @@ interface FlightStore {
   chartView: 'time' | 'duration';
   highlightedFlightId: string | null;
   
-  // Airport & Recommendations Cache
+  // Round-trip selection state
+  selectedOutboundFlight: Flight | null;
+  selectedReturnFlight: Flight | null;
+  returnFlights: Flight[];
+  filteredReturnFlights: Flight[];
+  isLoadingReturn: boolean;
+  currentLeg: 'outbound' | 'return';
+  
+  // Airport Cache
   airportCache: AirportCache;
   defaultAirports: AirportLocation[];
   defaultAirportsFetched: boolean;
-  recommendations: TravelRecommendation[];
+  recommendations: unknown[];  // Legacy - not used
   recommendationsFetched: boolean;
   
   // Actions
@@ -82,11 +91,20 @@ interface FlightStore {
   setHighlightedFlight: (id: string | null) => void;
   setError: (error: string | null) => void;
   
-  // Airport & Recommendations Cache Actions
+  // Round-trip selection actions
+  selectOutboundFlight: (flight: Flight) => void;
+  selectReturnFlight: (flight: Flight) => void;
+  setReturnFlights: (flights: Flight[]) => void;
+  setLoadingReturn: (loading: boolean) => void;
+  clearFlightSelections: () => void;
+  deselectOutbound: () => void;
+  deselectReturn: () => void;
+  
+  // Airport Cache Actions
   cacheAirports: (keyword: string, airports: AirportLocation[]) => void;
   getCachedAirports: (keyword: string) => AirportLocation[] | null;
   setDefaultAirports: (airports: AirportLocation[]) => void;
-  setRecommendations: (recs: TravelRecommendation[]) => void;
+  setRecommendations: (recs: unknown[]) => void;
 }
 
 const defaultFilters: Filters = {
@@ -169,7 +187,9 @@ function applyHighlight(flights: Flight[], highlightedId: string | null): Flight
   return [highlighted, ...flights.filter(f => f.id !== highlightedId)];
 }
 
-export const useFlightStore = create<FlightStore>((set, get) => ({
+export const useFlightStore = create<FlightStore>()(
+  persist(
+    (set, get) => ({
   searchParams: defaultSearchParams,
   rawFlights: [],
   filteredFlights: [],
@@ -179,6 +199,14 @@ export const useFlightStore = create<FlightStore>((set, get) => ({
   error: null,
   chartView: 'time',
   highlightedFlightId: null,
+  
+  // Round-trip selection state
+  selectedOutboundFlight: null,
+  selectedReturnFlight: null,
+  returnFlights: [],
+  filteredReturnFlights: [],
+  isLoadingReturn: false,
+  currentLeg: 'outbound',
   
   // Airport & Recommendations Cache
   airportCache: {},
@@ -245,6 +273,56 @@ export const useFlightStore = create<FlightStore>((set, get) => ({
   
   setError: (error) => set({ error, isLoading: false }),
   
+  // Round-trip selection actions
+  selectOutboundFlight: (flight) => set({
+    selectedOutboundFlight: flight,
+    currentLeg: 'return',
+  }),
+  
+  selectReturnFlight: (flight) => set({
+    selectedReturnFlight: flight,
+  }),
+  
+  setReturnFlights: (flights) => set((state) => {
+    // Apply filters but DON'T use the outbound price range - return flights have different prices
+    const returnPriceRange: [number, number] = flights.length > 0 
+      ? [Math.floor(Math.min(...flights.map(f => f.price)) / 10) * 10,
+         Math.ceil(Math.max(...flights.map(f => f.price)) / 10) * 10]
+      : [0, 10000];
+    
+    // Use filters with return-specific price range
+    const returnFilters = { ...state.filters, priceRange: returnPriceRange };
+    const filteredReturnFlights = applyFiltersAndSort(flights, returnFilters, state.sortOption);
+    
+    return {
+      returnFlights: flights,
+      filteredReturnFlights,
+      isLoadingReturn: false,
+    };
+  }),
+  
+  setLoadingReturn: (isLoadingReturn) => set({ isLoadingReturn }),
+  
+  clearFlightSelections: () => set({
+    selectedOutboundFlight: null,
+    selectedReturnFlight: null,
+    returnFlights: [],
+    filteredReturnFlights: [],
+    currentLeg: 'outbound',
+  }),
+  
+  deselectOutbound: () => set({
+    selectedOutboundFlight: null,
+    selectedReturnFlight: null,
+    returnFlights: [],
+    filteredReturnFlights: [],
+    currentLeg: 'outbound',
+  }),
+  
+  deselectReturn: () => set({
+    selectedReturnFlight: null,
+  }),
+  
   // Airport Cache Actions
   cacheAirports: (keyword, airports) => set((state) => ({
     airportCache: { ...state.airportCache, [keyword.toLowerCase()]: airports }
@@ -260,8 +338,20 @@ export const useFlightStore = create<FlightStore>((set, get) => ({
     defaultAirportsFetched: true,
   }),
   
-  setRecommendations: (recs) => set({
-    recommendations: recs,
-    recommendationsFetched: true,
+    setRecommendations: (recs) => set({
+      recommendations: recs,
+      recommendationsFetched: true,
+    }),
   }),
-}));
+  {
+    name: 'flight-store',
+    storage: createJSONStorage(() => localStorage),
+    // Only persist airport cache data - not flights or selections
+    partialize: (state) => ({
+      airportCache: state.airportCache,
+      defaultAirports: state.defaultAirports,
+      defaultAirportsFetched: state.defaultAirportsFetched,
+    }),
+  }
+  )
+);
