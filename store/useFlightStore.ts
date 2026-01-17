@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { AirportLocation } from '@/app/actions/amadeus';
+import { PRICE_CONFIG, CACHE_CONFIG } from '@/lib/constants';
 
 // Types
 export interface SearchParams {
@@ -77,8 +78,6 @@ interface FlightStore {
   airportCache: AirportCache;
   defaultAirports: AirportLocation[];
   defaultAirportsFetched: boolean;
-  recommendations: unknown[];  // Legacy - not used
-  recommendationsFetched: boolean;
   
   // Actions
   setSearchParams: (params: Partial<SearchParams>) => void;
@@ -104,12 +103,11 @@ interface FlightStore {
   cacheAirports: (keyword: string, airports: AirportLocation[]) => void;
   getCachedAirports: (keyword: string) => AirportLocation[] | null;
   setDefaultAirports: (airports: AirportLocation[]) => void;
-  setRecommendations: (recs: unknown[]) => void;
 }
 
 const defaultFilters: Filters = {
   stops: 'any',
-  priceRange: [0, 10000],
+  priceRange: [0, PRICE_CONFIG.DEFAULT_PRICE_RANGE_MAX],
   airlines: [],
   departureTime: [],
 };
@@ -150,7 +148,7 @@ function applyFiltersAndSort(flights: Flight[], filters: Filters, sortOption: So
   // Filter by departure time
   if (filters.departureTime.length > 0) {
     result = result.filter(f => {
-      const hour = parseInt(f.departureTime.split(':')[0]);
+      const hour = parseInt(f.departureTime.split(':')[0], 10);
       const period = hour >= 5 && hour < 12 ? 'morning' :
                      hour >= 12 && hour < 18 ? 'afternoon' :
                      hour >= 18 && hour < 24 ? 'evening' : 'night';
@@ -173,7 +171,7 @@ function applyFiltersAndSort(flights: Flight[], filters: Filters, sortOption: So
       result.sort((a, b) => b.departureTime.localeCompare(a.departureTime));
       break;
     default: // 'best' - price weighted with duration
-      result.sort((a, b) => (a.price + a.duration * 0.5) - (b.price + b.duration * 0.5));
+      result.sort((a, b) => (a.price + a.duration * PRICE_CONFIG.PRICE_DURATION_WEIGHT) - (b.price + b.duration * PRICE_CONFIG.PRICE_DURATION_WEIGHT));
   }
   
   return result;
@@ -185,6 +183,26 @@ function applyHighlight(flights: Flight[], highlightedId: string | null): Flight
   const highlighted = flights.find(f => f.id === highlightedId);
   if (!highlighted) return flights;
   return [highlighted, ...flights.filter(f => f.id !== highlightedId)];
+}
+
+// Helper: Calculate price range from flights
+function calculatePriceRange(flights: Flight[]): [number, number] {
+  if (flights.length === 0) return [0, PRICE_CONFIG.DEFAULT_PRICE_RANGE_MAX];
+  return [
+    Math.floor(Math.min(...flights.map(f => f.price)) / 10) * 10,
+    Math.ceil(Math.max(...flights.map(f => f.price)) / 10) * 10
+  ];
+}
+
+// Helper: Clean up airport cache to keep only recent entries (LRU)
+function cleanupAirportCache(cache: AirportCache): AirportCache {
+  const entries = Object.entries(cache);
+  if (entries.length <= CACHE_CONFIG.MAX_AIRPORT_CACHE_ENTRIES) {
+    return cache;
+  }
+  // Keep only the most recent entries (last N entries)
+  const recentEntries = entries.slice(-CACHE_CONFIG.MAX_AIRPORT_CACHE_ENTRIES);
+  return Object.fromEntries(recentEntries);
 }
 
 export const useFlightStore = create<FlightStore>()(
@@ -208,23 +226,17 @@ export const useFlightStore = create<FlightStore>()(
   isLoadingReturn: false,
   currentLeg: 'outbound',
   
-  // Airport & Recommendations Cache
+  // Airport Cache
   airportCache: {},
   defaultAirports: [],
   defaultAirportsFetched: false,
-  recommendations: [],
-  recommendationsFetched: false,
   
   setSearchParams: (params) => set((state) => ({
     searchParams: { ...state.searchParams, ...params }
   })),
   
   setFlights: (flights) => set((state) => {
-    const priceRange: [number, number] = flights.length > 0 
-      ? [Math.floor(Math.min(...flights.map(f => f.price)) / 10) * 10,
-         Math.ceil(Math.max(...flights.map(f => f.price)) / 10) * 10]
-      : [0, 10000];
-    
+    const priceRange = calculatePriceRange(flights);
     const newFilters = { ...state.filters, priceRange };
     return {
       rawFlights: flights,
@@ -243,10 +255,7 @@ export const useFlightStore = create<FlightStore>()(
   }),
   
   resetFilters: () => set((state) => {
-    const priceRange: [number, number] = state.rawFlights.length > 0
-      ? [Math.floor(Math.min(...state.rawFlights.map(f => f.price)) / 10) * 10,
-         Math.ceil(Math.max(...state.rawFlights.map(f => f.price)) / 10) * 10]
-      : [0, 10000];
+    const priceRange = calculatePriceRange(state.rawFlights);
     const filters = { ...defaultFilters, priceRange };
     return {
       filters,
@@ -285,12 +294,7 @@ export const useFlightStore = create<FlightStore>()(
   
   setReturnFlights: (flights) => set((state) => {
     // Apply filters but DON'T use the outbound price range - return flights have different prices
-    const returnPriceRange: [number, number] = flights.length > 0 
-      ? [Math.floor(Math.min(...flights.map(f => f.price)) / 10) * 10,
-         Math.ceil(Math.max(...flights.map(f => f.price)) / 10) * 10]
-      : [0, 10000];
-    
-    // Use filters with return-specific price range
+    const returnPriceRange = calculatePriceRange(flights);
     const returnFilters = { ...state.filters, priceRange: returnPriceRange };
     const filteredReturnFlights = applyFiltersAndSort(flights, returnFilters, state.sortOption);
     
@@ -324,9 +328,11 @@ export const useFlightStore = create<FlightStore>()(
   }),
   
   // Airport Cache Actions
-  cacheAirports: (keyword, airports) => set((state) => ({
-    airportCache: { ...state.airportCache, [keyword.toLowerCase()]: airports }
-  })),
+  cacheAirports: (keyword, airports) => set((state) => {
+    const newCache = { ...state.airportCache, [keyword.toLowerCase()]: airports };
+    const cleanedCache = cleanupAirportCache(newCache);
+    return { airportCache: cleanedCache };
+  }),
   
   getCachedAirports: (keyword) => {
     const cache = get().airportCache;
@@ -337,21 +343,19 @@ export const useFlightStore = create<FlightStore>()(
     defaultAirports: airports,
     defaultAirportsFetched: true,
   }),
-  
-    setRecommendations: (recs) => set({
-      recommendations: recs,
-      recommendationsFetched: true,
-    }),
   }),
   {
     name: 'flight-store',
     storage: createJSONStorage(() => localStorage),
     // Only persist airport cache data - not flights or selections
-    partialize: (state) => ({
-      airportCache: state.airportCache,
-      defaultAirports: state.defaultAirports,
-      defaultAirportsFetched: state.defaultAirportsFetched,
-    }),
+    partialize: (state) => {
+      const cleanedCache = cleanupAirportCache(state.airportCache);
+      return {
+        airportCache: cleanedCache,
+        defaultAirportsFetched: state.defaultAirportsFetched,
+        // Don't persist defaultAirports - they can be refetched
+      };
+    },
   }
   )
 );

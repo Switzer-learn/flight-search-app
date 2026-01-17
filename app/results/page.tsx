@@ -13,6 +13,10 @@ import { AirportInput } from '@/components/AirportInput';
 import { PassengerSelector } from '@/components/PassengerSelector';
 import { SelectedFlightSummary } from '@/components/SelectedFlightSummary';
 import { format, addDays } from 'date-fns';
+import { DATE_CONFIG } from '@/lib/constants';
+import { logError, createLogger } from '@/lib/logger';
+
+const logger = createLogger('ResultsPage');
 
 function ResultsContent() {
     const router = useRouter();
@@ -100,7 +104,7 @@ function ResultsContent() {
                         return results.find(a => a.iataCode === code) || results[0];
                     }
                 } catch (err) {
-                    console.error('Airport search failed:', err);
+                    logError(err, 'Airport search failed');
                 }
                 return null;
             };
@@ -125,7 +129,7 @@ function ResultsContent() {
                     setEditDestination({ iataCode: to, name: to, cityName: to, countryCode: '', countryName: '' });
                 }
             } catch (err) {
-                console.error('Failed to fetch airport details:', err);
+                logError(err, 'Failed to fetch airport details');
                 setAirportLoadError('Failed to load airport details');
                 // Use IATA codes as fallback
                 setEditOrigin({ iataCode: from, name: from, cityName: from, countryCode: '', countryName: '' });
@@ -161,7 +165,7 @@ function ResultsContent() {
     }, [editOrigin, editDestination, editDate, editReturnDate, editTripType, editAdults, editChildren, editInfants, from, to, date, returnDate, tripTypeParam, adultsParam, childrenParam, infantsParam]);
 
     const today = format(new Date(), 'yyyy-MM-dd');
-    const maxDate = format(addDays(new Date(), 365), 'yyyy-MM-dd');
+    const maxDate = format(addDays(new Date(), DATE_CONFIG.MAX_DAYS_AHEAD), 'yyyy-MM-dd');
     const totalTravelers = editAdults + editChildren + editInfants;
     const isRoundTrip = editTripType === 'round-trip';
 
@@ -220,15 +224,15 @@ function ResultsContent() {
                 if (outboundResult.error) {
                     setError(outboundResult.error);
                 } else {
-                    console.log('[Results Page] Outbound flights:', outboundResult.flights.length);
-                    console.log('[Results Page] Return flights:', returnResult.flights.length, returnResult.error);
+                    logger.debug('Outbound flights:', outboundResult.flights.length);
+                    logger.debug('Return flights:', returnResult.flights.length, returnResult.error);
 
                     setFlights(outboundResult.flights);
                     // Pre-load return flights
                     if (!returnResult.error) {
                         setReturnFlights(returnResult.flights);
                     } else {
-                        console.error('[Results Page] Return flight error:', returnResult.error);
+                        logger.error('Return flight error:', returnResult.error);
                     }
                     // Update store with current search params
                     if (editOrigin && editDestination) {

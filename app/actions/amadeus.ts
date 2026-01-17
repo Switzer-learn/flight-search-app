@@ -1,45 +1,27 @@
 'use server';
 
-// Shared token cache
-let tokenCache: { token: string; expiry: number } | null = null;
+import { getAmadeusToken } from '@/lib/amadeusTokenCache';
+import { withRateLimit } from '@/lib/rateLimiter';
+import { logError, createLogger } from '@/lib/logger';
+import { API_CONFIG, INPUT_VALIDATION } from '@/lib/constants';
 
-export async function getAmadeusToken(): Promise<string> {
-  // Check cache
-  if (tokenCache && Date.now() < tokenCache.expiry) {
-    return tokenCache.token;
-  }
-  
-  const clientId = process.env.AMADEUS_API_KEY;
-  const clientSecret = process.env.AMADEUS_API_SECRET;
-  
-  if (!clientId || !clientSecret) {
-    throw new Error('Amadeus API credentials not configured');
-  }
-  
-  const response = await fetch('https://test.api.amadeus.com/v1/security/oauth2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-    }),
-  });
-  
-  if (!response.ok) {
-    throw new Error('Failed to authenticate with Amadeus API');
-  }
-  
-  const data = await response.json();
-  tokenCache = {
-    token: data.access_token,
-    expiry: Date.now() + (data.expires_in - 60) * 1000, // Refresh 1 min early
+const logger = createLogger('amadeus');
+
+// Amadeus API response types
+export interface AmadeusLocationData {
+  iataCode: string;
+  name: string;
+  address?: {
+    cityName?: string;
+    countryCode?: string;
+    countryName?: string;
   };
-  
-  return tokenCache.token;
 }
 
-// Airport/City Search API
+export interface AmadeusLocationResponse {
+  data: AmadeusLocationData[];
+}
+
 export interface AirportLocation {
   iataCode: string;
   name: string;
@@ -48,40 +30,69 @@ export interface AirportLocation {
   countryName: string;
 }
 
-export async function searchAirports(keyword: string): Promise<AirportLocation[]> {
-  if (!keyword || keyword.length < 2) return [];
-  
-  try {
-    const token = await getAmadeusToken();
-    
-    const response = await fetch(
-      `https://test.api.amadeus.com/v1/reference-data/locations?subType=AIRPORT,CITY&keyword=${encodeURIComponent(keyword)}&page[limit]=100`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
-    
-    if (!response.ok) {
-      console.error('Airport search failed:', await response.text());
-      return [];
-    }
-    
-    const data = await response.json();
-    
-    if (!data.data || data.data.length === 0) {
-      return [];
-    }
-    
-    return data.data.map((loc: any) => ({
-      iataCode: loc.iataCode,
-      name: loc.name,
-      cityName: loc.address?.cityName || loc.name,
-      countryCode: loc.address?.countryCode || '',
-      countryName: loc.address?.countryName || '',
-    }));
-  } catch (error) {
-    console.error('Airport search error:', error);
-    return [];
+/**
+ * Validate airport search keyword
+ * @param keyword - The search keyword
+ * @throws Error if keyword is invalid
+ */
+function validateKeyword(keyword: string): void {
+  if (keyword.length < INPUT_VALIDATION.MIN_KEYWORD_LENGTH) {
+    throw new Error(`Keyword must be at least ${INPUT_VALIDATION.MIN_KEYWORD_LENGTH} characters`);
+  }
+  if (keyword.length > INPUT_VALIDATION.MAX_KEYWORD_LENGTH) {
+    throw new Error(`Keyword must be at most ${INPUT_VALIDATION.MAX_KEYWORD_LENGTH} characters`);
+  }
+  if (!INPUT_VALIDATION.KEYWORD_PATTERN.test(keyword)) {
+    throw new Error('Keyword contains invalid characters');
   }
 }
 
+/**
+ * Transform Amadeus location data to our AirportLocation format
+ */
+function transformLocation(loc: AmadeusLocationData): AirportLocation {
+  return {
+    iataCode: loc.iataCode,
+    name: loc.name,
+    cityName: loc.address?.cityName || loc.name,
+    countryCode: loc.address?.countryCode || '',
+    countryName: loc.address?.countryName || '',
+  };
+}
+
+/**
+ * Search airports and cities via Amadeus API
+ * @param keyword - Search keyword (city name or airport code)
+ * @returns Promise resolving to array of airport locations
+ */
+async function searchAirportsInternal(keyword: string): Promise<AirportLocation[]> {
+  // Validate input
+  validateKeyword(keyword);
+  
+  const token = await getAmadeusToken();
+  const locationsUrl = process.env.AMADEUS_LOCATIONS_URL || 'https://test.api.amadeus.com/v1/reference-data/locations';
+  
+  const response = await fetch(
+    `${locationsUrl}?subType=AIRPORT,CITY&keyword=${encodeURIComponent(keyword)}&page[limit]=${API_CONFIG.PAGE_LIMIT}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error('Airport search API error', { status: response.status, errorText });
+    throw new Error(`Failed to search airports: ${response.status} ${response.statusText}`);
+  }
+  
+  const data: AmadeusLocationResponse = await response.json();
+  
+  if (!data.data || data.data.length === 0) {
+    return [];
+  }
+  
+  return data.data.map(transformLocation);
+}
+
+// Export rate-limited version
+export const searchAirports = withRateLimit(searchAirportsInternal, 'searchAirports');

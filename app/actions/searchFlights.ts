@@ -1,47 +1,53 @@
 'use server';
 
 import type { Flight } from '@/store/useFlightStore';
+import { getAmadeusToken } from '@/lib/amadeusTokenCache';
+import { withRateLimit } from '@/lib/rateLimiter';
+import { logError, createLogger } from '@/lib/logger';
+import { API_CONFIG, PRICE_CONFIG } from '@/lib/constants';
 
-// Token cache
-let tokenCache: { token: string; expiry: number } | null = null;
+const logger = createLogger('searchFlights');
 
-async function getAmadeusToken(): Promise<string> {
-  // Check cache
-  if (tokenCache && Date.now() < tokenCache.expiry) {
-    return tokenCache.token;
-  }
-  
-  const clientId = process.env.AMADEUS_API_KEY;
-  const clientSecret = process.env.AMADEUS_API_SECRET;
-  
-  if (!clientId || !clientSecret) {
-    throw new Error('Amadeus API credentials not configured');
-  }
-  
-  const response = await fetch('https://test.api.amadeus.com/v1/security/oauth2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-    }),
-  });
-  
-  if (!response.ok) {
-    throw new Error('Failed to authenticate with Amadeus API');
-  }
-  
-  const data = await response.json();
-  tokenCache = {
-    token: data.access_token,
-    expiry: Date.now() + (data.expires_in - 60) * 1000, // Refresh 1 min early
+// Amadeus API response types
+export interface AmadeusSegment {
+  departure: {
+    at: string;
+    iataCode: string;
   };
-  
-  return tokenCache.token;
+  arrival: {
+    at: string;
+    iataCode: string;
+  };
+  carrierCode: string;
+  duration?: string;
 }
 
-interface SearchFlightsParams {
+export interface AmadeusItinerary {
+  duration: string;
+  segments: AmadeusSegment[];
+}
+
+export interface AmadeusPrice {
+  total: string;
+  currency: string;
+}
+
+export interface AmadeusFlightOffer {
+  id: string;
+  price: AmadeusPrice;
+  itineraries: AmadeusItinerary[];
+}
+
+export interface AmadeusDictionaries {
+  carriers?: Record<string, string>;
+}
+
+export interface AmadeusFlightOffersResponse {
+  data: AmadeusFlightOffer[];
+  dictionaries?: AmadeusDictionaries;
+}
+
+export interface SearchFlightsParams {
   origin: string;
   destination: string;
   departureDate: string;
@@ -51,30 +57,131 @@ interface SearchFlightsParams {
   infants?: number;
 }
 
-interface SearchFlightsResult {
+export interface SearchFlightsResult {
   flights: Flight[];
   error: string | null;
 }
 
-// Parse ISO duration (PT8H25M) to minutes
+/**
+ * Validate IATA code format
+ */
+function validateIataCode(code: string): void {
+  if (!/^[A-Z]{3}$/i.test(code)) {
+    throw new Error('Invalid IATA code format');
+  }
+}
+
+/**
+ * Validate date format (YYYY-MM-DD)
+ */
+function validateDate(date: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error('Invalid date format');
+  }
+  const parsed = new Date(date);
+  if (isNaN(parsed.getTime())) {
+    throw new Error('Invalid date');
+  }
+}
+
+/**
+ * Validate passenger counts
+ */
+function validatePassengers(params: SearchFlightsParams): void {
+  const total = params.adults + (params.children || 0) + (params.infants || 0);
+  if (total < 1 || total > 9) {
+    throw new Error('Total passengers must be between 1 and 9');
+  }
+  if (params.adults < 1) {
+    throw new Error('At least one adult is required');
+  }
+}
+
+/**
+ * Validate search parameters
+ */
+function validateSearchParams(params: SearchFlightsParams): void {
+  validateIataCode(params.origin);
+  validateIataCode(params.destination);
+  validateDate(params.departureDate);
+  if (params.returnDate) {
+    validateDate(params.returnDate);
+  }
+  validatePassengers(params);
+}
+
+/**
+ * Parse ISO duration (PT8H25M) to minutes
+ */
 function parseDuration(iso: string): number {
   const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?/);
   if (!match) return 0;
-  const hours = parseInt(match[1] || '0');
-  const minutes = parseInt(match[2] || '0');
+  const hours = parseInt(match[1] || '0', 10);
+  const minutes = parseInt(match[2] || '0', 10);
   return hours * 60 + minutes;
 }
 
-export async function searchFlights(params: SearchFlightsParams): Promise<SearchFlightsResult> {
+/**
+ * Transform Amadeus flight offer to our Flight type
+ */
+function transformFlightOffer(offer: AmadeusFlightOffer, dictionaries?: AmadeusDictionaries): Flight {
+  const outbound = offer.itineraries[0];
+  const inbound = offer.itineraries[1];
+  const firstSegment = outbound.segments[0];
+  const lastSegment = outbound.segments[outbound.segments.length - 1];
+  
+  // Get stop cities (exclude origin and destination)
+  const stopCities = outbound.segments.length > 1
+    ? outbound.segments.slice(0, -1).map((s) => s.arrival.iataCode)
+    : [];
+  
+  // Get carrier name from dictionaries if available
+  const carrierCode = firstSegment.carrierCode;
+  const airlineName = dictionaries?.carriers?.[carrierCode] || carrierCode;
+  
+  return {
+    id: offer.id,
+    airline: airlineName,
+    airlineCode: carrierCode,
+    price: parseFloat(offer.price.total),
+    currency: offer.price.currency,
+    departureTime: firstSegment.departure.at.split('T')[1].substring(0, 5),
+    arrivalTime: lastSegment.arrival.at.split('T')[1].substring(0, 5),
+    duration: parseDuration(outbound.duration),
+    stops: outbound.segments.length - 1,
+    stopCities,
+    outbound: {
+      departure: firstSegment.departure.at,
+      arrival: lastSegment.arrival.at,
+      duration: parseDuration(outbound.duration),
+    },
+    inbound: inbound ? {
+      departure: inbound.segments[0].departure.at,
+      arrival: inbound.segments[inbound.segments.length - 1].arrival.at,
+      duration: parseDuration(inbound.duration),
+    } : undefined,
+  };
+}
+
+/**
+ * Search flights via Amadeus API
+ * @param params - Search parameters
+ * @returns Promise resolving to search result with flights and error
+ */
+async function searchFlightsInternal(params: SearchFlightsParams): Promise<SearchFlightsResult> {
   try {
+    // Validate input
+    validateSearchParams(params);
+    
     const token = await getAmadeusToken();
+    const flightOffersUrl = process.env.AMADEUS_FLIGHT_OFFERS_URL || 'https://test.api.amadeus.com/v2/shopping/flight-offers';
     
     const searchParams = new URLSearchParams({
       originLocationCode: params.origin,
       destinationLocationCode: params.destination,
       departureDate: params.departureDate,
       adults: params.adults.toString(),
-      max: '50',
+      max: API_CONFIG.FLIGHT_OFFERS_LIMIT.toString(),
       currencyCode: 'USD',
     });
     
@@ -88,30 +195,26 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Search
       searchParams.set('infants', params.infants.toString());
     }
     
-    console.log('[searchFlights] Request:', {
+    logger.debug('Flight search request', {
       origin: params.origin,
       destination: params.destination,
       departureDate: params.departureDate,
       returnDate: params.returnDate,
-      fullUrl: `https://test.api.amadeus.com/v2/shopping/flight-offers?${searchParams}`
     });
     
-    const response = await fetch(
-      `https://test.api.amadeus.com/v2/shopping/flight-offers?${searchParams}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+    const response = await fetch(`${flightOffersUrl}?${searchParams}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error('[searchFlights] API error:', errorData);
+      logger.error('Flight search API error', { status: response.status, errorData });
       return { flights: [], error: 'Failed to fetch flights. Please try again.' };
     }
     
-    const data = await response.json();
+    const data: AmadeusFlightOffersResponse = await response.json();
     
-    console.log('[searchFlights] Response:', {
+    logger.debug('Flight search response', {
       origin: params.origin,
       destination: params.destination,
       flightCount: data.data?.length || 0,
@@ -122,49 +225,14 @@ export async function searchFlights(params: SearchFlightsParams): Promise<Search
     }
     
     // Transform Amadeus response to our Flight type
-    // Amadeus response structure: https://developers.amadeus.com/self-service/category/flights/api-doc/flight-offers-search
-    const flights: Flight[] = data.data.map((offer: any) => {
-      const outbound = offer.itineraries[0];
-      const inbound = offer.itineraries[1];
-      const firstSegment = outbound.segments[0];
-      const lastSegment = outbound.segments[outbound.segments.length - 1];
-      
-      // Get stop cities (exclude origin and destination)
-      const stopCities = outbound.segments.length > 1
-        ? outbound.segments.slice(0, -1).map((s: any) => s.arrival.iataCode)
-        : [];
-      
-      // Get carrier name from dictionaries if available
-      const carrierCode = firstSegment.carrierCode;
-      const airlineName = data.dictionaries?.carriers?.[carrierCode] || carrierCode;
-      
-      return {
-        id: offer.id,
-        airline: airlineName,
-        airlineCode: carrierCode,
-        price: parseFloat(offer.price.total),
-        currency: offer.price.currency,
-        departureTime: firstSegment.departure.at.split('T')[1].substring(0, 5),
-        arrivalTime: lastSegment.arrival.at.split('T')[1].substring(0, 5),
-        duration: parseDuration(outbound.duration),
-        stops: outbound.segments.length - 1,
-        stopCities,
-        outbound: {
-          departure: firstSegment.departure.at,
-          arrival: lastSegment.arrival.at,
-          duration: parseDuration(outbound.duration),
-        },
-        inbound: inbound ? {
-          departure: inbound.segments[0].departure.at,
-          arrival: inbound.segments[inbound.segments.length - 1].arrival.at,
-          duration: parseDuration(inbound.duration),
-        } : undefined,
-      };
-    });
+    const flights: Flight[] = data.data.map((offer) => transformFlightOffer(offer, data.dictionaries));
     
     return { flights, error: null };
   } catch (error) {
-    console.error('Search flights error:', error);
+    logError(error, 'Search flights error');
     return { flights: [], error: error instanceof Error ? error.message : 'An error occurred' };
   }
 }
+
+// Export rate-limited version
+export const searchFlights = withRateLimit(searchFlightsInternal, 'searchFlights');

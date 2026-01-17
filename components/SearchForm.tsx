@@ -7,6 +7,7 @@ import { format, addDays } from 'date-fns';
 import { useFlightStore } from '@/store/useFlightStore';
 import { AirportInput, type AirportLocation } from '@/components/AirportInput';
 import { PassengerSelector } from '@/components/PassengerSelector';
+import { DATE_CONFIG, PASSENGER_LIMITS } from '@/lib/constants';
 
 export function SearchForm() {
     const router = useRouter();
@@ -14,8 +15,8 @@ export function SearchForm() {
     const [tripType, setTripType] = useState<'one-way' | 'round-trip'>(searchParams.tripType);
     const [origin, setOrigin] = useState<AirportLocation | null>(searchParams.origin);
     const [destination, setDestination] = useState<AirportLocation | null>(searchParams.destination);
-    const [departureDate, setDepartureDate] = useState(searchParams.departureDate || format(addDays(new Date(), 7), 'yyyy-MM-dd'));
-    const [returnDate, setReturnDate] = useState(searchParams.returnDate || format(addDays(new Date(), 14), 'yyyy-MM-dd'));
+    const [departureDate, setDepartureDate] = useState(searchParams.departureDate || format(addDays(new Date(), DATE_CONFIG.DEFAULT_DEPARTURE_DAYS_AHEAD), 'yyyy-MM-dd'));
+    const [returnDate, setReturnDate] = useState(searchParams.returnDate || format(addDays(new Date(), DATE_CONFIG.DEFAULT_RETURN_DAYS_AHEAD), 'yyyy-MM-dd'));
     const [adults, setAdults] = useState(searchParams.adults);
     const [children, setChildren] = useState(searchParams.children);
     const [infants, setInfants] = useState(searchParams.infants);
@@ -28,7 +29,7 @@ export function SearchForm() {
     }, [searchParams.destination]);
 
     const today = format(new Date(), 'yyyy-MM-dd');
-    const maxDate = format(addDays(new Date(), 365), 'yyyy-MM-dd');
+    const maxDate = format(addDays(new Date(), DATE_CONFIG.MAX_DAYS_AHEAD), 'yyyy-MM-dd');
 
     const canSearch = origin && destination && departureDate && (tripType === 'one-way' || returnDate);
 
@@ -114,6 +115,7 @@ export function SearchForm() {
                         <button
                             type="button"
                             onClick={handleSwap}
+                            aria-label="Swap origin and destination"
                             className="flex w-8 h-8 md:w-10 md:h-10 items-center justify-center rounded-full border-2 border-gray-200 
                 bg-white text-gray-800 hover:border-[#3B82F6] hover:text-[#3B82F6] transition-colors text-base md:text-lg shrink-0 self-center md:self-end md:mb-1"
                         >

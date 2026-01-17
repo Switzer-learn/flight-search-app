@@ -3,13 +3,14 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useFlightStore, type SortOption } from '@/store/useFlightStore';
+import { PRICE_CONFIG } from '@/lib/constants';
 
 export function FilterSidebar() {
     const { rawFlights, filters, setFilters, resetFilters, sortOption, setSortOption } = useFlightStore();
 
     // Calculate price bounds from raw flights
     const priceBounds = useMemo(() => {
-        if (rawFlights.length === 0) return { min: 0, max: 1000 };
+        if (rawFlights.length === 0) return { min: 0, max: PRICE_CONFIG.DEFAULT_PRICE_RANGE_MAX };
         const prices = rawFlights.map(f => f.price);
         return {
             min: Math.floor(Math.min(...prices)),

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { useFlightStore } from '@/store/useFlightStore';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -96,12 +96,12 @@ export function PriceChart() {
         return '#3B82F6'; // Blue
     };
 
-    const handleDotClick = (data: any) => {
+    const handleDotClick = useCallback((data: any) => {
         if (data?.id) {
             // Toggle highlight - if same dot clicked, unhighlight
             setHighlightedFlight(highlightedFlightId === data.id ? null : data.id);
         }
-    };
+    }, [highlightedFlightId, setHighlightedFlight]);
 
     const CustomTooltip = ({ active, payload }: any) => {
         if (!active || !payload?.[0]) return null;

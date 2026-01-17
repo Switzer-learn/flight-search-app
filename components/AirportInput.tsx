@@ -7,6 +7,9 @@ import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import { searchAirports as searchAirportsAPI, type AirportLocation } from '@/app/actions/amadeus';
 import { useFlightStore } from '@/store/useFlightStore';
+import { logError, createLogger } from '@/lib/logger';
+
+const logger = createLogger('AirportInput');
 
 interface AirportInputProps {
     label: string;
@@ -57,7 +60,7 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
                 setError('No airports found');
             }
         } catch (err) {
-            console.error('Airport search failed:', err);
+            logError(err, 'Airport search failed');
             setError('Failed to search airports');
             setOptions([]);
         } finally {
@@ -80,8 +83,8 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
                     setOptions(defaultAirports);
                 }
             }}
-            options={options.filter((airport, index, self) =>
-                index === self.findIndex(a => a.iataCode === airport.iataCode)
+            options={Array.from(
+                new Map(options.map(airport => [airport.iataCode, airport])).values()
             )}
             getOptionLabel={(option) => `${option.cityName} (${option.iataCode})`}
             isOptionEqualToValue={(option, val) => option.iataCode === val.iataCode}
