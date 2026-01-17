@@ -128,54 +128,6 @@ export function SelectedFlightSummary({
                     )}
                 </motion.div>
             </div>
-
-            {/* Mobile Version - Sticky Bottom */}
-            <div className="md:hidden fixed bottom-0 left-0 right-0 z-50">
-                <motion.div
-                    initial={{ y: 100 }}
-                    animate={{ y: 0 }}
-                    className="bg-white border-t border-gray-200 shadow-lg px-4 py-3 safe-area-inset-bottom"
-                >
-                    {/* Collapsed Summary */}
-                    <div className="flex items-center justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 text-sm">
-                                <span className="font-medium text-gray-900 truncate">
-                                    {origin?.iataCode} → {destination?.iataCode}
-                                </span>
-                                {selectedReturnFlight && (
-                                    <span className="text-gray-400 text-xs">+ return</span>
-                                )}
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-xs text-gray-500">
-                                    {passengerCount} passenger{passengerCount > 1 ? 's' : ''}
-                                </span>
-                                {!selectedReturnFlight && isRoundTrip && (
-                                    <span className="text-xs text-amber-600">Select return</span>
-                                )}
-                                {(selectedReturnFlight || !isRoundTrip) && (
-                                    <span className="text-xs text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">Demo</span>
-                                )}
-                            </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                            <div className="text-lg font-bold text-[#3B82F6]">
-                                ${grandTotal.toLocaleString()}
-                            </div>
-                            <button
-                                onClick={deselectOutbound}
-                                className="text-xs text-gray-500 hover:text-gray-700"
-                            >
-                                Edit
-                            </button>
-                        </div>
-                    </div>
-                </motion.div>
-            </div>
-
-            {/* Mobile Bottom Padding Spacer */}
-            <div className="md:hidden h-20" />
         </>
     );
 }

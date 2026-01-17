@@ -139,14 +139,22 @@ export function FilterSidebar() {
                         { value: '1' as const, label: '1 stop or fewer', count: counts.oneStop },
                         { value: '2+' as const, label: '2+ stops', count: counts.twoPlus },
                     ].map(option => (
-                        <label key={option.value} className="flex items-center gap-3 cursor-pointer group">
-                            <input
-                                type="radio"
-                                name="stops"
-                                checked={filters.stops === option.value}
-                                onChange={() => handleStopsChange(option.value)}
-                                className="w-4 h-4 text-[#3B82F6] border-gray-300 focus:ring-[#3B82F6]"
-                            />
+                        <label
+                            key={option.value}
+                            className="flex items-center gap-3 cursor-pointer group"
+                            onClick={() => handleStopsChange(option.value)}
+                        >
+                            {/* Custom Radio Button */}
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all
+                                ${filters.stops === option.value
+                                    ? 'border-[#3B82F6] bg-[#3B82F6]'
+                                    : 'border-gray-300 group-hover:border-gray-400'
+                                }`}
+                            >
+                                {filters.stops === option.value && (
+                                    <div className="w-2 h-2 rounded-full bg-white" />
+                                )}
+                            </div>
                             <span className="text-sm text-gray-700 group-hover:text-gray-900 flex-1">
                                 {option.label}
                             </span>

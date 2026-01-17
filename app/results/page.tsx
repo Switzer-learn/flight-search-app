@@ -12,6 +12,7 @@ import { FilterSidebar } from '@/components/FilterSidebar';
 import { AirportInput } from '@/components/AirportInput';
 import { PassengerSelector } from '@/components/PassengerSelector';
 import { SelectedFlightSummary } from '@/components/SelectedFlightSummary';
+import { FlightSelectedModal } from '@/components/FlightSelectedModal';
 import { format, addDays } from 'date-fns';
 import { DATE_CONFIG } from '@/lib/constants';
 import { logError, createLogger } from '@/lib/logger';
@@ -70,6 +71,9 @@ function ResultsContent() {
     // Manual expansion state for flight sections
     const [isOutboundExpanded, setIsOutboundExpanded] = useState(true);
     const [isReturnExpanded, setIsReturnExpanded] = useState(false);
+
+    // Mobile flight selection modal state
+    const [showFlightModal, setShowFlightModal] = useState(false);
 
     // Get cache functions from store
     const { getCachedAirports, cacheAirports } = useFlightStore();
@@ -287,15 +291,28 @@ function ResultsContent() {
 
     // Handle flight selection (outbound or return)
     const handleFlightSelect = useCallback((flight: Flight) => {
+        // Check if mobile (viewport width < 768px)
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
         if (isRoundTrip && !selectedOutboundFlight) {
             // Selecting outbound flight
             selectOutboundFlight(flight);
+            // Collapse outbound, expand return
+            setIsOutboundExpanded(false);
+            setIsReturnExpanded(true);
         } else if (isRoundTrip && selectedOutboundFlight && !selectedReturnFlight) {
-            // Selecting return flight
+            // Selecting return flight - now show modal on mobile
             selectReturnFlight(flight);
+            setIsReturnExpanded(false);
+            if (isMobile) {
+                setShowFlightModal(true);
+            }
         } else {
-            // One-way trip - just select the flight
+            // One-way trip - select and show modal on mobile
             selectOutboundFlight(flight);
+            if (isMobile) {
+                setShowFlightModal(true);
+            }
         }
     }, [isRoundTrip, selectedOutboundFlight, selectedReturnFlight, selectOutboundFlight, selectReturnFlight]);
 
@@ -763,6 +780,20 @@ function ResultsContent() {
                     </>
                 )}
             </AnimatePresence>
+
+            {/* Mobile Flight Selection Modal */}
+            <FlightSelectedModal
+                outboundFlight={selectedOutboundFlight}
+                returnFlight={selectedReturnFlight}
+                isOpen={showFlightModal}
+                onClose={() => setShowFlightModal(false)}
+                passengerCount={totalTravelers}
+                originCode={from || ''}
+                originCity={editOrigin?.cityName || from || ''}
+                destinationCode={to || ''}
+                destinationCity={editDestination?.cityName || to || ''}
+                isRoundTrip={isRoundTrip}
+            />
         </div>
     );
 }
