@@ -73,7 +73,7 @@ async function searchAirportsInternal(keyword: string): Promise<AirportLocation[
   const locationsUrl = process.env.AMADEUS_LOCATIONS_URL || 'https://test.api.amadeus.com/v1/reference-data/locations';
   
   const response = await fetch(
-    `${locationsUrl}?subType=AIRPORT,CITY&keyword=${encodeURIComponent(keyword)}&page[limit]=${API_CONFIG.PAGE_LIMIT}`,
+    `${locationsUrl}?subType=AIRPORT&keyword=${encodeURIComponent(keyword)}&page[limit]=${API_CONFIG.PAGE_LIMIT}`,
     {
       headers: { Authorization: `Bearer ${token}` },
     }

@@ -5,11 +5,9 @@ import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
-import { searchAirports as searchAirportsAPI, type AirportLocation } from '@/app/actions/amadeus';
+import { type AirportLocation } from '@/app/actions/amadeus';
 import { useFlightStore } from '@/store/useFlightStore';
-import { logError, createLogger } from '@/lib/logger';
 
-const logger = createLogger('AirportInput');
 
 interface AirportInputProps {
     label: string;
@@ -21,64 +19,28 @@ interface AirportInputProps {
 
 export function AirportInput({ label, placeholder, value, onChange, size = 'medium' }: AirportInputProps) {
     const [inputValue, setInputValue] = useState('');
-    const [options, setOptions] = useState<AirportLocation[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
 
     const {
         defaultAirports,
         defaultAirportsFetched,
-        getCachedAirports,
-        cacheAirports
     } = useFlightStore();
 
     // Show loading when opened but default airports not yet loaded
-    const isInitialLoading = !defaultAirportsFetched && options.length === 0;
+    const isInitialLoading = !defaultAirportsFetched;
 
-    // Search airports via Amadeus API
-    const fetchAirports = useCallback(async (query: string) => {
-        setError(null);
+    // Custom filter function for client-side filtering
+    // Matches by city name, airport name, or IATA code
+    const filterOptions = useCallback((options: AirportLocation[], state: { inputValue: string }) => {
+        const query = state.inputValue.toLowerCase().trim();
+        if (!query) return options;
 
-        if (query.length < 2) {
-            // Show default airports when query is short
-            setOptions(defaultAirports);
-            return;
-        }
-
-        // Validate query - skip API call if invalid characters
-        // (only allow letters, numbers, spaces, hyphens, apostrophes)
-        if (!/^[a-zA-Z0-9\s\-']+$/.test(query)) {
-            setOptions([]);
-            setError('No airports found');
-            return;
-        }
-
-        // Check cache first
-        const cached = getCachedAirports(query);
-        if (cached && cached.length > 0) {
-            setOptions(cached);
-            return;
-        }
-
-        // Fetch from Amadeus API
-        setLoading(true);
-        try {
-            const results = await searchAirportsAPI(query);
-            if (results.length > 0) {
-                setOptions(results);
-                cacheAirports(query, results);
-            } else {
-                setOptions([]);
-                setError('No airports found');
-            }
-        } catch (err) {
-            logError(err, 'Airport search failed');
-            setError('Failed to search airports');
-            setOptions([]);
-        } finally {
-            setLoading(false);
-        }
-    }, [defaultAirports, getCachedAirports, cacheAirports]);
+        return options.filter(airport =>
+            airport.cityName.toLowerCase().includes(query) ||
+            airport.name.toLowerCase().includes(query) ||
+            airport.iataCode.toLowerCase().includes(query) ||
+            airport.countryName?.toLowerCase().includes(query)
+        );
+    }, []);
 
     return (
         <Autocomplete
@@ -87,22 +49,14 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
             inputValue={inputValue}
             onInputChange={(_, newInputValue) => {
                 setInputValue(newInputValue);
-                fetchAirports(newInputValue);
+                // No API call here - filtering is done client-side
             }}
-            onOpen={() => {
-                // Load default airports on open if not already loaded
-                if (options.length === 0 && defaultAirports.length > 0) {
-                    setOptions(defaultAirports);
-                }
-            }}
-            options={Array.from(
-                new Map(options.map(airport => [airport.iataCode, airport])).values()
-            )}
+            options={defaultAirports}
             getOptionLabel={(option) => `${option.cityName} (${option.iataCode})`}
             isOptionEqualToValue={(option, val) => option.iataCode === val.iataCode}
-            filterOptions={(x) => x} // We handle filtering via API
-            loading={loading || isInitialLoading}
-            noOptionsText={error || ((loading || isInitialLoading) ? 'Loading airports...' : 'Type to search airports')}
+            filterOptions={filterOptions}
+            loading={isInitialLoading}
+            noOptionsText={isInitialLoading ? 'Loading airports...' : 'No airports found'}
             size={size}
             slotProps={{
                 popper: {
@@ -181,7 +135,7 @@ export function AirportInput({ label, placeholder, value, onChange, size = 'medi
                         ...params.InputProps,
                         endAdornment: (
                             <>
-                                {loading ? <CircularProgress color="inherit" size={20} /> : null}
+                                {isInitialLoading ? <CircularProgress color="inherit" size={20} /> : null}
                                 {params.InputProps.endAdornment}
                             </>
                         ),

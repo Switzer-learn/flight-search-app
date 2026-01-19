@@ -22,24 +22,9 @@ export function AppInitializer() {
         if (!defaultAirportsFetched) {
             async function fetchAirports() {
                 try {
-                    // Fetch popular airports from different regions
-                    const [us, uk, asia] = await Promise.all([
-                        searchAirports('new'),
-                        searchAirports('lon'),
-                        searchAirports('tok'),
-                    ]);
-
-                    // Combine and deduplicate using Set for O(n) performance
-                    const allAirports = [...us, ...uk, ...asia];
-                    const seenIataCodes = new Set<string>();
-                    const unique: typeof allAirports = [];
-
-                    for (const airport of allAirports) {
-                        if (!seenIataCodes.has(airport.iataCode)) {
-                            seenIataCodes.add(airport.iataCode);
-                            unique.push(airport);
-                        }
-                    }
+                    // Fetch airports with a single broad API call to minimize rate limiting
+                    // The Amadeus API returns up to 100 results per call
+                    const unique = await searchAirports('air');
 
                     if (unique.length > 0) {
                         setDefaultAirports(unique);

@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useFlightStore, type Flight } from '@/store/useFlightStore';
 import { searchFlights } from '@/app/actions/searchFlights';
-import { searchAirports, type AirportLocation } from '@/app/actions/amadeus';
+import { type AirportLocation } from '@/app/actions/amadeus';
 import { PriceChart } from '@/components/PriceChart';
 import { FlightCard } from '@/components/FlightCard';
 import { FilterSidebar } from '@/components/FilterSidebar';
@@ -75,74 +75,42 @@ function ResultsContent() {
     // Mobile flight selection modal state
     const [showFlightModal, setShowFlightModal] = useState(false);
 
-    // Get cache functions from store
-    const { getCachedAirports, cacheAirports } = useFlightStore();
+    // Get default airports from store (loaded once at app startup)
+    const { defaultAirports } = useFlightStore();
 
-    // Fetch airport details - prioritize store, then cache, then API
+    // Lookup airport details from the pre-loaded defaultAirports list (no API calls)
     useEffect(() => {
-        async function fetchAirportDetails() {
-            if (!from || !to) return;
+        if (!from || !to) return;
 
-            // 1. First check if we already have the airports in store (from homepage)
-            if (storeSearchParams.origin?.iataCode === from && storeSearchParams.destination?.iataCode === to) {
-                setEditOrigin(storeSearchParams.origin);
-                setEditDestination(storeSearchParams.destination);
-                return;
-            }
-
-            // Helper to get airport from cache or API
-            const getAirport = async (code: string): Promise<AirportLocation | null> => {
-                // Check cache first
-                const cached = getCachedAirports(code);
-                if (cached && cached.length > 0) {
-                    const match = cached.find(a => a.iataCode === code);
-                    if (match) return match;
-                }
-
-                // Fall back to API only if not cached
-                try {
-                    const results = await searchAirports(code);
-                    if (results.length > 0) {
-                        // Cache the results
-                        cacheAirports(code, results);
-                        return results.find(a => a.iataCode === code) || results[0];
-                    }
-                } catch (err) {
-                    logError(err, 'Airport search failed');
-                }
-                return null;
-            };
-
-            try {
-                // Fetch origin and destination (uses cache when available)
-                const [origin, dest] = await Promise.all([
-                    getAirport(from),
-                    getAirport(to),
-                ]);
-
-                if (origin) {
-                    setEditOrigin(origin);
-                } else {
-                    // Create minimal airport object if not found
-                    setEditOrigin({ iataCode: from, name: from, cityName: from, countryCode: '', countryName: '' });
-                }
-
-                if (dest) {
-                    setEditDestination(dest);
-                } else {
-                    setEditDestination({ iataCode: to, name: to, cityName: to, countryCode: '', countryName: '' });
-                }
-            } catch (err) {
-                logError(err, 'Failed to fetch airport details');
-                setAirportLoadError('Failed to load airport details');
-                // Use IATA codes as fallback
-                setEditOrigin({ iataCode: from, name: from, cityName: from, countryCode: '', countryName: '' });
-                setEditDestination({ iataCode: to, name: to, cityName: to, countryCode: '', countryName: '' });
-            }
+        // 1. First check if we already have the airports in store (from homepage)
+        if (storeSearchParams.origin?.iataCode === from && storeSearchParams.destination?.iataCode === to) {
+            setEditOrigin(storeSearchParams.origin);
+            setEditDestination(storeSearchParams.destination);
+            return;
         }
 
-        fetchAirportDetails();
-    }, [from, to, storeSearchParams.origin, storeSearchParams.destination, getCachedAirports, cacheAirports]);
+        // Helper to find airport from the pre-loaded list
+        const findAirport = (code: string): AirportLocation | null => {
+            return defaultAirports.find(a => a.iataCode === code) || null;
+        };
+
+        // Look up origin and destination from pre-loaded airports
+        const origin = findAirport(from);
+        const dest = findAirport(to);
+
+        if (origin) {
+            setEditOrigin(origin);
+        } else {
+            // Create minimal airport object if not found in pre-loaded list
+            setEditOrigin({ iataCode: from, name: from, cityName: from, countryCode: '', countryName: '' });
+        }
+
+        if (dest) {
+            setEditDestination(dest);
+        } else {
+            setEditDestination({ iataCode: to, name: to, cityName: to, countryCode: '', countryName: '' });
+        }
+    }, [from, to, storeSearchParams.origin, storeSearchParams.destination, defaultAirports]);
 
     // Initialize other edit state when URL params change
     useEffect(() => {
@@ -167,6 +135,22 @@ function ResultsContent() {
             editInfants !== infantsParam
         );
     }, [editOrigin, editDestination, editDate, editReturnDate, editTripType, editAdults, editChildren, editInfants, from, to, date, returnDate, tripTypeParam, adultsParam, childrenParam, infantsParam]);
+
+    // Check if form is valid for submission
+    const isFormValid = useMemo(() => {
+        if (!editOrigin || !editDestination || !editDate) return false;
+        if (editTripType === 'round-trip' && !editReturnDate) return false;
+        return true;
+    }, [editOrigin, editDestination, editDate, editTripType, editReturnDate]);
+
+    // Get validation message for the Filter button
+    const validationMessage = useMemo(() => {
+        if (!editOrigin) return 'Select origin airport';
+        if (!editDestination) return 'Select destination airport';
+        if (!editDate) return 'Select departure date';
+        if (editTripType === 'round-trip' && !editReturnDate) return 'Select return date';
+        return null;
+    }, [editOrigin, editDestination, editDate, editTripType, editReturnDate]);
 
     const today = format(new Date(), 'yyyy-MM-dd');
     const maxDate = format(addDays(new Date(), DATE_CONFIG.MAX_DAYS_AHEAD), 'yyyy-MM-dd');
@@ -470,7 +454,7 @@ function ResultsContent() {
                                                 setEditInfants(i);
                                             }}
                                         />
-                                        <div className="flex gap-2">
+                                        <div className="flex items-center gap-2">
                                             <button
                                                 onClick={() => setIsEditing(false)}
                                                 className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
@@ -478,14 +462,25 @@ function ResultsContent() {
                                                 Cancel
                                             </button>
                                             {hasChanges && (
-                                                <motion.button
-                                                    initial={{ opacity: 0, scale: 0.9 }}
-                                                    animate={{ opacity: 1, scale: 1 }}
-                                                    onClick={handleApplyChanges}
-                                                    className="px-5 py-2 bg-[#3B82F6] hover:bg-[#2563EB] text-white text-sm font-medium rounded-lg transition-colors"
-                                                >
-                                                    Filter
-                                                </motion.button>
+                                                <div className="flex items-center gap-2">
+                                                    {!isFormValid && validationMessage && (
+                                                        <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
+                                                            {validationMessage}
+                                                        </span>
+                                                    )}
+                                                    <motion.button
+                                                        initial={{ opacity: 0, scale: 0.9 }}
+                                                        animate={{ opacity: 1, scale: 1 }}
+                                                        onClick={handleApplyChanges}
+                                                        disabled={!isFormValid}
+                                                        className={`px-5 py-2 text-sm font-medium rounded-lg transition-colors ${isFormValid
+                                                            ? 'bg-[#3B82F6] hover:bg-[#2563EB] text-white cursor-pointer'
+                                                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                                            }`}
+                                                    >
+                                                        Filter
+                                                    </motion.button>
+                                                </div>
                                             )}
                                         </div>
                                     </div>
@@ -598,7 +593,7 @@ function ResultsContent() {
                                                             passengerCount={totalTravelers}
                                                             isRoundTrip={false}
                                                             onSelect={(f) => {
-                                                                handleFlightSelect(f);
+                                                                selectOutboundFlight(f);
                                                                 setIsOutboundExpanded(false);
                                                                 setIsReturnExpanded(true);
                                                             }}
@@ -696,8 +691,13 @@ function ResultsContent() {
                                                                 passengerCount={totalTravelers}
                                                                 isRoundTrip={false}
                                                                 onSelect={(f) => {
-                                                                    handleFlightSelect(f);
+                                                                    selectReturnFlight(f);
                                                                     setIsReturnExpanded(false);
+                                                                    // Show mobile modal if both flights now selected
+                                                                    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+                                                                    if (isMobile) {
+                                                                        setShowFlightModal(true);
+                                                                    }
                                                                 }}
                                                                 originCode={to || ''}
                                                                 destinationCode={from || ''}
